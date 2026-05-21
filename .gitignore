@@ -1,0 +1,5 @@
+/build/
+*.bin
+# The IWAD is not redistributable — keep it out of the repo.
+*.wad
+*.WAD
