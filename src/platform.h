@@ -12,11 +12,24 @@
 #include <cronopio.h>
 #include <stdint.h>
 
-/* DOOM renders 320x200; the Cronopio screen is 320x240, so we letterbox with
- * 20-row black bars top and bottom. */
+/* Render resolution. The Cronopio screen is 320x240 (4:3, square pixels). DOOM
+ * renders into a DOOM_W x DOOM_H indexed buffer; plat_present maps it onto the
+ * full screen at 4:3 (no letterbox). Two modes, selectable via DOOM_H:
+ *
+ *   B (DOOM_H = 200, default): vanilla render height. plat_present scales x1.2
+ *     vertically (200 -> 240, duplicating one row in six). This reproduces the
+ *     exact 4:3 look of DOOM on a CRT (where 320x200 was stretched to fill the
+ *     screen) and is the cheaper hot path (~17% less rasterising).
+ *   C (DOOM_H = 240): native render height — Crispy renders 240 rows for ~20%
+ *     more vertical FOV. plat_present copies 1:1. Costs +20% rasterising and
+ *     touches the renderer/HUD.
+ *
+ * (cvm-cc has no -D passthrough yet, so this is a compile-time #define rather
+ * than a build flag for now.) */
 #define DOOM_W       320
+#ifndef DOOM_H
 #define DOOM_H       200
-#define DOOM_FB_TOP  ((CRON_SCREEN_H - DOOM_H) / 2)   /* = 20 */
+#endif
 
 void     plat_init(void);
 void     plat_log(const char *s);                      /* NUL-terminated -> cron_log */

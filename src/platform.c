@@ -29,19 +29,24 @@ void plat_present(const uint8_t *indexed, const uint8_t *palette_rgb) {
 
     volatile uint8_t *fb = CRON_FB;
 
-    /* top letterbox bar */
-    for (int i = 0; i < DOOM_FB_TOP * CRON_SCREEN_W; ++i) fb[i] = 0;
-
-    /* the 320x200 image, row by row */
-    for (int y = 0; y < DOOM_H; ++y) {
-        volatile uint8_t *row = fb + (DOOM_FB_TOP + y) * CRON_SCREEN_W;
+#if DOOM_H == CRON_SCREEN_H
+    /* Mode C: native 320x240 — straight 1:1 copy. */
+    for (int y = 0; y < CRON_SCREEN_H; ++y) {
+        volatile uint8_t *row = fb + y * CRON_SCREEN_W;
         const uint8_t    *src = indexed + y * DOOM_W;
         for (int x = 0; x < DOOM_W; ++x) row[x] = src[x];
     }
-
-    /* bottom letterbox bar */
-    for (int i = (DOOM_FB_TOP + DOOM_H) * CRON_SCREEN_W;
-         i < CRON_SCREEN_W * CRON_SCREEN_H; ++i) fb[i] = 0;
+#else
+    /* Mode B: render is DOOM_H tall (e.g. 200) — scale vertically to fill the
+     * full screen height (4:3). Each output row samples source row y*DOOM_H/H
+     * (nearest), which for 200->240 duplicates one row in six. No black bars. */
+    for (int y = 0; y < CRON_SCREEN_H; ++y) {
+        int               sy  = (y * DOOM_H) / CRON_SCREEN_H;
+        volatile uint8_t *row = fb + y * CRON_SCREEN_W;
+        const uint8_t    *src = indexed + sy * DOOM_W;
+        for (int x = 0; x < DOOM_W; ++x) row[x] = src[x];
+    }
+#endif
 }
 
 int plat_audio_push(const int16_t *stereo, int frames) {
