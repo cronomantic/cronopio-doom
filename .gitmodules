@@ -1,3 +1,4 @@
 [submodule "third_party/crispy-doom"]
 	path = third_party/crispy-doom
-	url = https://github.com/fabiangreffrath/crispy-doom
+	url = https://github.com/cronomantic/crispy-doom.git
+	branch = cronopio-port
