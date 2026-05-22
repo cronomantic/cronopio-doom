@@ -18,6 +18,7 @@
 #include "doomtype.h"
 #include "d_event.h"
 #include "doomkeys.h"
+#include "crispy.h"   /* crispy->input: 0 = gamepad only, 1 = gamepad + keyboard */
 
 /* Crispy entry points (i_main.c is excluded; we own argc/argv). */
 extern void D_DoomMain(void);
@@ -65,6 +66,12 @@ const uint8_t *engine_palette(void)
 
 /* ---- input ------------------------------------------------------------- */
 /* Post a DOOM key event. data2/data3 carry the ASCII rep for menu typing. */
+/* noinline: inlined into poll_keyboard's (register-heavy) frame, the CronoVM
+ * translator miscompiled `ev.type = down ? ev_keydown : ev_keyup` — ev.type
+ * came out as garbage (-2), so D_ProcessEvents' responders dropped every
+ * keyboard event, while the byte-identical gamepad call worked. Forcing a
+ * separate frame produces correct codegen. (Translator codegen bug, to revisit.) */
+__attribute__((noinline))
 static void post_key(boolean down, int key, int ascii)
 {
     event_t ev;
@@ -95,10 +102,63 @@ static const padmap_t padmaps[] = {
 
 static uint32_t prev_pad = 0;
 
+/* ---- keyboard ---------------------------------------------------------- */
+/* cron_key(scancode) reports key state in the USB HID usage-ID space (the
+ * CRON_KEY_* values in cronopio.h). That is exactly the space Crispy's
+ * SCANCODE_TO_KEYS_ARRAY (doomkeys.h) is indexed by — the same table the
+ * vendored SDL i_input.c uses — so we reuse it verbatim for a full classic
+ * keyboard map (movement, weapons 1-7, use/fire/run/strafe, menu, F-keys)
+ * with zero bespoke mapping. data2/data3 carry the ASCII rep for menu typing
+ * (printable keys map to their own code; specials type nothing). */
+static const int sc_to_key[] = SCANCODE_TO_KEYS_ARRAY;
+#define NUM_SCANCODES (int)(sizeof(sc_to_key) / sizeof(sc_to_key[0]))
+
+/* Modifier keys live above SCANCODE_TO_KEYS_ARRAY (which only covers HID
+ * 0..103); map them the way the vendored i_input.c TranslateKey does so
+ * fire (Ctrl), run (Shift) and strafe (Alt) work. */
+static const struct { int sc; int key; } kb_mods[] = {
+    { CRON_KEY_LCTRL,  KEY_RCTRL  }, { CRON_KEY_RCTRL,  KEY_RCTRL  },
+    { CRON_KEY_LSHIFT, KEY_RSHIFT }, { CRON_KEY_RSHIFT, KEY_RSHIFT },
+    { CRON_KEY_LALT,   KEY_LALT   }, { CRON_KEY_RALT,   KEY_RALT   },
+};
+#define NUM_KBMODS (int)(sizeof(kb_mods) / sizeof(kb_mods[0]))
+
+static uint8_t kb_prev[256]; /* per-scancode held state (HID id), for edges */
+
+static void poll_keyboard(void)
+{
+    /* Printable / named keys: HID scancodes 0..103 via Crispy's table. */
+    for (int sc = 0; sc < NUM_SCANCODES; ++sc)
+    {
+        int key = sc_to_key[sc];
+        if (key == 0) continue;                 /* unmapped scancode slot */
+
+        uint8_t down = cron_key(sc) ? 1 : 0;
+        if (down != kb_prev[sc])
+        {
+            int ascii = (key >= 32 && key < 127) ? key : 0;
+            post_key(down != 0, key, ascii);
+            kb_prev[sc] = down;
+        }
+    }
+    /* Modifiers (Ctrl/Shift/Alt), which sit above the table. */
+    for (int i = 0; i < NUM_KBMODS; ++i)
+    {
+        int sc = kb_mods[i].sc;
+        uint8_t down = cron_key(sc) ? 1 : 0;
+        if (down != kb_prev[sc])
+        {
+            post_key(down != 0, kb_mods[i].key, 0);
+            kb_prev[sc] = down;
+        }
+    }
+}
+
 void engine_input(uint32_t pad)
 {
     uint32_t changed = pad ^ prev_pad;
 
+    /* Gamepad is always active — the system's primary control. */
     for (int i = 0; i < NUM_PADMAPS; ++i)
     {
         uint32_t b = padmaps[i].bit;
@@ -107,6 +167,9 @@ void engine_input(uint32_t pad)
             post_key((pad & b) != 0, padmaps[i].key, padmaps[i].ascii);
         }
     }
-
     prev_pad = pad;
+
+    /* Keyboard layered on top only when the in-game Input setting includes it. */
+    if (crispy->input != 0)
+        poll_keyboard();
 }
