@@ -17,6 +17,7 @@ OUT="${2:-$ROOT/doom.bin}"
 # --- include dirs (cronopio-cc takes -I and its arg as separate tokens) ----
 INCS=(
   -I "$ROOT/compat"
+  -I "$ROOT/src"
   -I "$SDK/include"
   -I "$RT"
   -I "$CR"

@@ -12,28 +12,50 @@
 #include <cronopio.h>
 #include <stdint.h>
 
-/* Render resolution. The Cronopio screen is 320x240 (4:3, square pixels). DOOM
- * renders into a DOOM_W x DOOM_H indexed buffer; plat_present maps it onto the
- * full screen at 4:3 (no letterbox). Two modes, selectable via DOOM_H:
+/* Render resolution. The Cronopio screen is 320x240 (4:3, square pixels).
  *
- *   B (DOOM_H = 200, default): vanilla render height. plat_present scales x1.2
- *     vertically (200 -> 240, duplicating one row in six). This reproduces the
- *     exact 4:3 look of DOOM on a CRT (where 320x200 was stretched to fill the
- *     screen) and is the cheaper hot path (~17% less rasterising).
- *   C (DOOM_H = 240): native render height — Crispy renders 240 rows for ~20%
- *     more vertical FOV. plat_present copies 1:1. Costs +20% rasterising and
- *     touches the renderer/HUD.
+ * ACCELERATED layout (CRON_ACCEL): a 320x200 fullscreen 3D view stacked on top
+ * of the 320x32 status bar (HUD), both drawn at x1 (undeformed), centered in
+ * 320x240 with a 4px black border top and bottom:
  *
- * (cvm-cc has no -D passthrough yet, so this is a compile-time #define rather
- * than a build flag for now.) */
+ *     rows   0..3    black border (CRON_VIEW_Y = 4)
+ *     rows   4..203  3D view        (320x200, viewheight=200)
+ *     rows 204..235  status bar/HUD (320x32, x1)
+ *     rows 236..239  black border
+ *
+ * So DOOM renders DOOM_H = 232 rows (200 view + 32 bar) into CRON_FB at a +4 row
+ * offset; SCREENHEIGHT is 232 so screenblocks 10 gives viewheight = 232-32 = 200
+ * and the bar lands at rows 200..231 (DOOM space). plat_present is 1:1 (no
+ * rescale -> no mutation) and paints the 4px borders. The HUD is x1 because we
+ * pin V_Init's patch-scaling dx/dy to 1 (see v_video.c) and reanchor ST_Y to
+ * SCREENHEIGHT-ST_HEIGHT (see st_stuff.h).
+ *
+ * Undefine CRON_ACCEL for classic mode B: a private 320x200 buffer that
+ * plat_present stretches x1.2 to fill 240 (pixel-faithful CRT 4:3, no GPU
+ * accelerators). */
+#define CRON_ACCEL   1
+
 #define DOOM_W       320
 #ifndef DOOM_H
-#define DOOM_H       200
+#ifdef CRON_ACCEL
+#define DOOM_H       232        /* 200 view + 32 status bar */
+#else
+#define DOOM_H       200        /* mode B: stretched to 240 */
 #endif
+#endif
+
+/* Black border that centers the DOOM_H-tall frame in 320x240 (= 4 rows). */
+#define CRON_VIEW_Y  ((CRON_SCREEN_H - DOOM_H) / 2)
 
 void     plat_init(void);
 void     plat_log(const char *s);                      /* NUL-terminated -> cron_log */
 uint32_t plat_time_ms(void);
+
+/* The Cronopio framebuffer region (CRON_FB), resolved at cart init. The engine
+ * renders DOOM_W*DOOM_H directly into it (I_VideoBuffer aliases this) so the
+ * GPU rasteriser accelerators (cron_tcol/tspan, which write CRON_FB) and the
+ * C-side patch drawing compose into one buffer. NULL before cron_resolve_video. */
+uint8_t *plat_framebuffer(void);
 
 /* Present a DOOM_W*DOOM_H 8bpp indexed frame and (optionally) a 256-entry
  * RGB palette (768 bytes; NULL keeps the current palette) to the Cronopio

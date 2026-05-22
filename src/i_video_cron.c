@@ -54,9 +54,22 @@ byte gamma2table[18][256];
 
 void I_GetScreenDimensions(void)
 {
-    /* Force vanilla, non-hires, non-widescreen geometry. */
+    /* Two render modes (selected at compile time by DOOM_H in platform.h):
+     *   Mode C (DOOM_H == 240): native 320x240. DOOM renders straight into the
+     *     320x240 CRON_FB (see I_InitGraphics) so the GPU accelerators
+     *     (cron_tcol/tspan, which write CRON_FB) and C-side drawing share one
+     *     persistent buffer — no per-frame rescale.
+     *   Mode B (DOOM_H == 200): vanilla 320x200 into a separate buffer that
+     *     plat_present scales to 240 (pixel-faithful CRT 4:3, no accelerators). */
     SCREENWIDTH      = ORIGWIDTH;        /* 320 */
-    SCREENHEIGHT     = ORIGHEIGHT;       /* 200 */
+#ifdef CRON_ACCEL
+    /* 200 (fullscreen 3D view at screenblocks 10) + 32 (status bar) = 232. With
+     * SCREENHEIGHT=232, R_SetViewSize gives viewheight = 232-32 = 200, and the
+     * bar sits at rows 200..231; plat_present centers the 232 rows in 240. */
+    SCREENHEIGHT     = ORIGHEIGHT + 32;          /* 232 (200 view + 32 ST_HEIGHT) */
+#else
+    SCREENHEIGHT     = ORIGHEIGHT;       /* 200 — mode B (stretched to 240) */
+#endif
     SCREENHEIGHT_4_3 = ORIGHEIGHT_4_3;   /* 240 */
     NONWIDEWIDTH     = SCREENWIDTH;
     WIDESCREENDELTA  = 0;
@@ -81,10 +94,19 @@ void I_InitGraphics(void)
     I_GetScreenDimensions();
     I_SetGammaTable();
 
+#ifdef CRON_ACCEL
+    /* Accelerated mode: render the 320x200 frame straight into CRON_FB, centered
+     * vertically (offset by CRON_VIEW_Y rows). The GPU rasteriser accelerators
+     * (cron_tcol/tspan, which write CRON_FB) and the C-side patch drawing share
+     * this one persistent buffer; plat_present is 1:1 (no rescale -> no buffer
+     * mutation) and paints the top/bottom letterbox. */
+    I_VideoBuffer = (pixel_t *)(plat_framebuffer()
+                                + CRON_VIEW_Y * CRON_SCREEN_W);
+#else
+    /* Mode B: a private buffer that plat_present stretches 200->240 for 4:3. */
     if (I_VideoBuffer == NULL)
-    {
         I_VideoBuffer = (pixel_t *)malloc(SCREENWIDTH * SCREENHEIGHT * sizeof(pixel_t));
-    }
+#endif
     memset(I_VideoBuffer, 0, SCREENWIDTH * SCREENHEIGHT * sizeof(pixel_t));
 
     screenvisible = true;
