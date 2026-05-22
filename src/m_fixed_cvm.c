@@ -99,6 +99,18 @@ int CVM_CrossDiv(int a, int b, int c, int d, int divisor)
     return neg ? -(int32_t)q : (int32_t)q;
 }
 
+/* [cronopio] (int64)(a*b + c*d) / divisor without i64 SSA. The dot-product
+ * sibling of CVM_CrossDiv, reusing it via a*b + c*d == a*b - (-c)*d. Used by
+ * r_segs.c's R_StoreWallRange for rw_offset (the wall-texture horizontal
+ * offset). Operands are passed UNSCALED — the full 64-bit product is formed
+ * inside CVM_CrossDiv (MULH), so this must NOT pre-halve like the old 32-bit
+ * `(dx*dx1+dy*dy1)>>...` did (that overflowed once operands were unscaled and,
+ * pre-fix, halved + drifted the result, which made wall textures swim). */
+int CVM_DotDiv(int a, int b, int c, int d, int divisor)
+{
+    return CVM_CrossDiv(a, b, -c, d, divisor);
+}
+
 /* [cronopio] (int64)(a1*b1 + a2*b2 + a3*b3) / s without i64 SSA.
  * Used by p_setup.c P_RemoveSlimeTrails (slime-trail removal projection). */
 static void add64(uint32_t *lo, int32_t *hi, int a, int b)
