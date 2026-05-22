@@ -53,7 +53,18 @@ int main(int argc, char** argv) {
         /* Hold the scancode down for the back two-thirds of the run. */
         memset(console.keys, 0, sizeof console.keys);
         console.pad_cur[0] = 0;
-        if (f >= hold_from) {
+        /* optional two-phase: env CRON_SC2 + CRON_T1 -> hold sc for the first
+         * CRON_T1 frames (after warmup), then sc2 for the rest. */
+        int held = sc;
+        const char* sc2s = getenv("CRON_SC2");
+        const char* t1s  = getenv("CRON_T1");
+        if (sc2s && t1s) {
+            int t1 = atoi(t1s);
+            if (f >= hold_from && f < hold_from + t1) held = sc;
+            else if (f >= hold_from + t1) held = (int)strtol(sc2s, NULL, 0);
+            else held = 0;
+            if (held) console.keys[(held >> 3) & 31] |= (uint8_t)(1u << (held & 7));
+        } else if (f >= hold_from) {
             if (sc & 0x10000)              /* bit 16 set: low 8 bits are pad bits */
                 console.pad_cur[0] = (uint32_t)(sc & 0xFF);
             else

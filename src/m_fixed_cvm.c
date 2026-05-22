@@ -111,6 +111,31 @@ int CVM_DotDiv(int a, int b, int c, int d, int divisor)
     return CVM_CrossDiv(a, b, -c, d, divisor);
 }
 
+/* [cronopio] ((int64)base + (int64)scale*delta + add) >> 16, returned as int.
+ * For R_DrawMaskedColumn's per-post screen bounds: vanilla computes
+ * topscreen/bottomscreen as int64 because the FULL product spryscale*top (no
+ * >>16) overflows 32 bits for close/tall sprites (e.g. a tree you walk up to),
+ * which truncated dc_yl/dc_yh and made sprites clip wrong / show through the
+ * floor. Forms scale*delta as a full 64-bit product (MULH), adds the (sign-
+ * extended) base and rounding term in 64-bit, then arithmetic >>16. */
+int CVM_SprClip(int base, int scale, int delta, int add)
+{
+    uint32_t lo = (uint32_t)(scale * delta);
+    int32_t  hi = cvm_mulh(scale, delta);
+    /* + base, sign-extended to 64 bits */
+    uint32_t nlo = lo + (uint32_t)base;
+    uint32_t carry = (nlo < lo) ? 1u : 0u;
+    hi = (int32_t)((uint32_t)hi + (uint32_t)(base >> 31) + carry);
+    lo = nlo;
+    /* + add, sign-extended */
+    nlo = lo + (uint32_t)add;
+    carry = (nlo < lo) ? 1u : 0u;
+    hi = (int32_t)((uint32_t)hi + (uint32_t)(add >> 31) + carry);
+    lo = nlo;
+    /* arithmetic >>16 of (hi:lo); the result (a screen row) fits in int */
+    return (int)((lo >> 16) | ((uint32_t)hi << 16));
+}
+
 /* [cronopio] (int64)(a1*b1 + a2*b2 + a3*b3) / s without i64 SSA.
  * Used by p_setup.c P_RemoveSlimeTrails (slime-trail removal projection). */
 static void add64(uint32_t *lo, int32_t *hi, int a, int b)
