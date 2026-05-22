@@ -39,6 +39,7 @@ int main(int argc, char** argv) {
     for (int fr = 0; fr < frames && !console.cart_exited; ++fr) {
         g_frame_ms = (uint64_t)fr * 1000u / 60u;
         memset(console.keys, 0, sizeof console.keys);
+        console.pad_cur[0] = 0;
         int t = fr - warm;
         if (t >= 0) {
             int idx = t / step;
@@ -46,6 +47,14 @@ int main(int argc, char** argv) {
             if (idx < nkeys && phase < HOLD) {
                 int sc = (int)strtol(argv[3 + idx], NULL, 0);
                 console.keys[(sc>>3)&31] |= (uint8_t)(1u<<(sc&7));
+                /* also drive cron_pad like the desktop host does, to exercise
+                 * the gamepad+keyboard double-input dedup. */
+                uint32_t pb = 0;
+                if      (sc==0x52) pb=1u<<0; else if (sc==0x51) pb=1u<<1;
+                else if (sc==0x50) pb=1u<<2; else if (sc==0x4F) pb=1u<<3;
+                else if (sc==0x28) pb=1u<<4;   /* ENTER ~ pad A */
+                else if (sc==0x29) pb=1u<<7;   /* ESC ~ pad Y */
+                console.pad_cur[0] |= pb;
             }
         }
         cronopio_console_begin_frame(&console);

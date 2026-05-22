@@ -94,16 +94,13 @@ static const padmap_t padmaps[] = {
 };
 #define NUM_PADMAPS (int)(sizeof(padmaps) / sizeof(padmaps[0]))
 
-static uint32_t prev_pad = 0;
-
 /* ---- keyboard ---------------------------------------------------------- */
 /* cron_key(scancode) reports key state in the USB HID usage-ID space (the
  * CRON_KEY_* values in cronopio.h). That is exactly the space Crispy's
  * SCANCODE_TO_KEYS_ARRAY (doomkeys.h) is indexed by — the same table the
  * vendored SDL i_input.c uses — so we reuse it verbatim for a full classic
  * keyboard map (movement, weapons 1-7, use/fire/run/strafe, menu, F-keys)
- * with zero bespoke mapping. data2/data3 carry the ASCII rep for menu typing
- * (printable keys map to their own code; specials type nothing). */
+ * with zero bespoke mapping. */
 static const int sc_to_key[] = SCANCODE_TO_KEYS_ARRAY;
 #define NUM_SCANCODES (int)(sizeof(sc_to_key) / sizeof(sc_to_key[0]))
 
@@ -117,53 +114,51 @@ static const struct { int sc; int key; } kb_mods[] = {
 };
 #define NUM_KBMODS (int)(sizeof(kb_mods) / sizeof(kb_mods[0]))
 
-static uint8_t kb_prev[256]; /* per-scancode held state (HID id), for edges */
+/* Per-DOOM-key state. We gather every input source into one "is this DOOM key
+ * down" bitmap (key_now) and post edges against the previous frame. This
+ * DEDUPES sources that map to the same DOOM key: e.g. the desktop host drives
+ * both the cron_pad d-pad AND the raw arrow keys from the same physical keys,
+ * which otherwise posted KEY_DOWNARROW twice and made menus skip entries. A
+ * DOOM key is "down" if ANY active source holds it. */
+static uint8_t key_now[256];
+static uint8_t key_prev[256];
+static int     key_ascii[256];
 
-static void poll_keyboard(void)
+static void mark_key(int key, int ascii)
 {
-    /* Printable / named keys: HID scancodes 0..103 via Crispy's table. */
-    for (int sc = 0; sc < NUM_SCANCODES; ++sc)
-    {
-        int key = sc_to_key[sc];
-        if (key == 0) continue;                 /* unmapped scancode slot */
-
-        uint8_t down = cron_key(sc) ? 1 : 0;
-        if (down != kb_prev[sc])
-        {
-            int ascii = (key >= 32 && key < 127) ? key : 0;
-            post_key(down != 0, key, ascii);
-            kb_prev[sc] = down;
-        }
-    }
-    /* Modifiers (Ctrl/Shift/Alt), which sit above the table. */
-    for (int i = 0; i < NUM_KBMODS; ++i)
-    {
-        int sc = kb_mods[i].sc;
-        uint8_t down = cron_key(sc) ? 1 : 0;
-        if (down != kb_prev[sc])
-        {
-            post_key(down != 0, kb_mods[i].key, 0);
-            kb_prev[sc] = down;
-        }
-    }
+    if (key <= 0 || key > 255) return;
+    key_now[key]   = 1;
+    key_ascii[key] = ascii;   /* same key -> same ascii from any source */
 }
 
 void engine_input(uint32_t pad)
 {
-    uint32_t changed = pad ^ prev_pad;
+    for (int k = 0; k < 256; ++k) key_now[k] = 0;
 
-    /* Gamepad is always active — the system's primary control. */
+    /* Gamepad — always active, the system's primary control. */
     for (int i = 0; i < NUM_PADMAPS; ++i)
-    {
-        uint32_t b = padmaps[i].bit;
-        if (changed & b)
-        {
-            post_key((pad & b) != 0, padmaps[i].key, padmaps[i].ascii);
-        }
-    }
-    prev_pad = pad;
+        if (pad & padmaps[i].bit)
+            mark_key(padmaps[i].key, padmaps[i].ascii);
 
-    /* Keyboard layered on top only when the in-game Input setting includes it. */
+    /* Keyboard — layered on top only when the Input Device setting includes it. */
     if (crispy->input != 0)
-        poll_keyboard();
+    {
+        for (int sc = 0; sc < NUM_SCANCODES; ++sc)
+        {
+            int key = sc_to_key[sc];
+            if (key && cron_key(sc))
+                mark_key(key, (key >= 32 && key < 127) ? key : 0);
+        }
+        for (int i = 0; i < NUM_KBMODS; ++i)
+            if (cron_key(kb_mods[i].sc))
+                mark_key(kb_mods[i].key, 0);
+    }
+
+    /* Post one edge per DOOM key on the union of all sources. */
+    for (int k = 1; k < 256; ++k)
+        if (key_now[k] != key_prev[k])
+        {
+            post_key(key_now[k] != 0, k, key_now[k] ? key_ascii[k] : 0);
+            key_prev[k] = key_now[k];
+        }
 }
