@@ -152,23 +152,17 @@ fixed_t FixedDiv(fixed_t a, fixed_t b)
         return (a ^ b) < 0 ? INT_MIN : INT_MAX;
     }
 
-    /* Past the guard the quotient fits in 32 bits. Divide the 48-bit
-     * magnitude (|a| << 16) by |b| bit by bit, then reapply the sign. */
-    int      neg    = (a ^ b) < 0;
-    uint32_t ua     = (a < 0) ? (uint32_t)(-a) : (uint32_t)a;
-    uint32_t ub     = (b < 0) ? (uint32_t)(-b) : (uint32_t)b;
-    uint32_t num_lo = ua << 16;
-    uint32_t num_hi = ua >> 16;          /* numerator = (num_hi : num_lo) */
-    uint32_t q = 0, rem = 0;
-
-    for (int i = 47; i >= 0; --i)
-    {
-        uint32_t bit = (i >= 32) ? ((num_hi >> (i - 32)) & 1u)
-                                 : ((num_lo >> i) & 1u);
-        rem = (rem << 1) | bit;
-        q <<= 1;
-        if (rem >= ub) { rem -= ub; q |= 1u; }
-    }
+    /* Past the guard the quotient fits in 32 bits. Divide the magnitude
+     * (|a| << 16) by |b| with the VM's QDIV1616 opcode (one host 64/32 op,
+     * via cvm_qdiv_16_16), then reapply the sign. Bit-identical to vanilla's
+     * `((int64_t)a << 16) / b`: both truncate toward zero, so the magnitude
+     * quotient with the sign reattached matches the signed division exactly.
+     * (Was a 48-iteration software long division — ~35% of in-level VM
+     * instructions; see the perf profiling notes.) */
+    int      neg = (a ^ b) < 0;
+    uint32_t ua  = (a < 0) ? (uint32_t)(-a) : (uint32_t)a;
+    uint32_t ub  = (b < 0) ? (uint32_t)(-b) : (uint32_t)b;
+    uint32_t q   = cvm_qdiv_16_16(ua, ub);
 
     return neg ? -(int32_t)q : (int32_t)q;
 }
