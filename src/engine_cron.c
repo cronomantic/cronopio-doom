@@ -66,12 +66,6 @@ const uint8_t *engine_palette(void)
 
 /* ---- input ------------------------------------------------------------- */
 /* Post a DOOM key event. data2/data3 carry the ASCII rep for menu typing. */
-/* noinline: inlined into poll_keyboard's (register-heavy) frame, the CronoVM
- * translator miscompiled `ev.type = down ? ev_keydown : ev_keyup` — ev.type
- * came out as garbage (-2), so D_ProcessEvents' responders dropped every
- * keyboard event, while the byte-identical gamepad call worked. Forcing a
- * separate frame produces correct codegen. (Translator codegen bug, to revisit.) */
-__attribute__((noinline))
 static void post_key(boolean down, int key, int ascii)
 {
     event_t ev;
