@@ -43,7 +43,7 @@ DOOM_KEEP=(
 SRC_KEEP=(
   a11y aes_prng crispy d_event d_iwad d_mode
   deh_io deh_main deh_mapping deh_str deh_text
-  m_argv m_bbox m_cheat m_config m_controls m_misc memio
+  m_argv m_bbox m_cheat m_config m_controls m_misc memio midifile mus2mid
   p_rejectpad sha1 tables v_diskicon v_trans v_video
   w_checksum w_file w_main w_merge w_wad z_zone
   i_truecolor

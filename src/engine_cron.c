@@ -49,9 +49,12 @@ void engine_init(void)
     plat_log("[engine] D_DoomMain returned (title ready)\n");
 }
 
+void I_Cron_UpdateMusic(void);   /* i_sound_cron.c — MIDI sequencer pump */
+
 void engine_tick(void)
 {
     doom_tick();
+    I_Cron_UpdateMusic();        /* advance music + dispatch due MIDI events */
 }
 
 const uint8_t *engine_framebuffer(void)
