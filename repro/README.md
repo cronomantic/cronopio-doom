@@ -1,34 +1,44 @@
-# Repro: translator rejects pointer-relocation global initializers (multi-file)
+# repro/ — headless debugging harnesses
 
-cvm-translate fails on any global whose initializer contains a pointer to
-another global (a string literal, a data global, or a function), once that
-global is *live* in the llvm-linked module. Single-file builds appear to work
-only because the global gets dead-code-eliminated after inlining.
+Small host programs that drive a cartridge **without an interactive window**, so
+DOOM behaviour can be exercised and screenshotted from the command line. They
+reuse Cronopio's headless harness (console + syscalls + a virtual 60 Hz clock)
+and link against the Cronopio host libs.
 
-This blocks Crispy Doom's core static tables: S_sfx[], S_music[] (struct arrays
-with a `char *name` member), sprnames[], mapnames[]/player_names[] (char*
-arrays), etc. — all of which are live in the real engine.
+> Historical note: this directory began as a minimal repro for a CronoVM
+> translator bug (pointer-relocation global initialisers in multi-file builds).
+> That bug is **fixed** — the full DOOM engine translates and runs — so the repro
+> pair has been removed. What remains here are the live debugging tools below.
 
-## Reproduce
+## Tools
 
-    cronopio-cc sfa.c sfb.c -o sf.bin
+- **`headless_key.c`** — holds a chosen HID scancode down (after a short warmup)
+  so the cart's input path posts the matching DOOM event; screenshots the result.
+  Confirms keyboard control end-to-end. Two-phase turns via `CRON_SC2`/`CRON_T1`
+  env vars (hold one key, then another), and pad bits via bit 16 of the scancode.
 
-Fails with:
+  ```sh
+  headless_key cart.bin frames scancode_hex [out.ppm]
+  headless_key doom.bin 200 0x29        # hold ESC -> main menu opens
+  ```
 
-    translator: global 'tbl': unsupported initializer shape
-    (or function-pointer initialiser without a definition for the referenced function)
+- **`headless_nav.c`** — taps a *sequence* of HID scancodes (each held a few
+  frames then released) and screenshots the final frame. For driving menus.
 
-A single-file build of an equivalent program translates fine (the array is
-folded/eliminated). The failing IR shape is e.g.:
+  ```sh
+  headless_nav cart.bin out.ppm sc1 sc2 sc3 ...
+  ```
 
-    @tbl = constant [3 x { ptr, i32 }] [ { ptr @.str, i32 1 }, ... ]
-    @.str = private unnamed_addr constant [4 x i8] c"aaa\00"
+## Building them
 
-i.e. an aggregate initializer with a relocation entry (`ptr @.str`).
+They are standalone host programs (not part of `build_doom.sh`). Compile against
+the Cronopio host common lib + CronoVM, e.g.:
 
-## Fix needed (translator)
+```sh
+clang -I <Cronopio>/host/common -I <Cronopio>/external/CronoVM/include \
+      headless_key.c \
+      <Cronopio>/build/host/libcronopio_common.a <Cronopio>/build/_cvm/libcvm.a \
+      -lkernel32 -luser32 -lshell32 -o headless_key.exe
+```
 
-cvm-translate must emit data-relocation entries for global initializers that
-reference the address of other globals (strings/data/functions), the same way
-it already lays out the globals themselves. Then DOOM's tables serialize and
-the port links.
+Convert the `.ppm` output to PNG (`magick out.ppm out.png`) to inspect visually.

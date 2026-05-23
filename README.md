@@ -1,44 +1,73 @@
 # cronopio-doom
 
 A DOOM port for the [Cronopio](https://github.com/Cronomantic/Cronopio) fantasy
-console (carts are CronoVM `.bin` files built with `cronopio-cc`).
+console. A cartridge is a CronoVM `.bin` built from C with `cronopio-cc`; the
+engine is [Crispy Doom](https://github.com/fabiangreffrath/crispy-doom)
+(limit-removing, vanilla-accurate) with the SDL/mixer/net backends replaced by a
+thin Cronopio platform layer.
 
-**Status:** skeleton. The cartridge builds and runs today with a placeholder
-"engine stub" that renders an animated test pattern — proving the Cronopio
-integration (8bpp framebuffer, palette, present loop, build) before any DOOM
-code is added. The source port to drop in is **not yet chosen**; see
-[`KICKOFF.md`](KICKOFF.md).
+**Status: playable.** Boots to the title and plays levels at an interactive
+rate. The 3D renderer is offloaded to Cronopio's GPU primitives; keyboard and
+gamepad input work; audio is wired — music plays through the host MIDI +
+SoundFont synth (DOOM MUS → MIDI) and SFX through the PCM voices (DMX `DS*`).
 
 ## Layout
 
 ```
 src/
-  doom_cart.c     the cartridge (single unity TU); CRONOPIO_CART entry point
-  platform.h/.c   Cronopio platform layer: present(8bpp+palette), audio, time, log
-  wad_rom.h/.c    read the WAD from cartridge ROM (no filesystem on the VM)
-  engine.h        the 5-function seam the engine binding implements
-  engine_stub.c   placeholder engine (replace with the real port's binding)
-third_party/      the DOOM source port goes here
-KICKOFF.md        full context + plan (read this first)
+  doom_cart.c        cartridge entry: wires the Cronopio frame callback to the engine
+  engine_cron.c      engine seam — boots D_DoomMain, drives one frame per tick
+  platform.c/.h      Cronopio platform layer: present (8bpp+palette), audio, time, log
+  i_video_cron.c     framebuffer / palette presentation
+  i_sound_cron.c     music (MUS→MIDI→cron_midi) + SFX (DMX→cron_pcm)
+  i_input_cron.c     keyboard + gamepad → DOOM events
+  i_system/timer/...  the rest of the I_* backend (no filesystem, ROM WAD, ...)
+  w_file_rom.c       read the WAD from cartridge ROM (the VM has no filesystem)
+  m_fixed_cvm.c      i64 fixed-point helpers via CronoVM intrinsic opcodes
+compat/              tiny SDL_*/headers shims so the vendored tree builds unmodified
+third_party/crispy-doom   the engine (submodule, branch cronopio-port)
+wads/                IWADs baked into carts (freedoom1.wad, freedoom2.wad)
+build_doom.sh        the build (cvm-cc compiles every .c, llvm-links, cvm-translate)
+repro/               headless harnesses for debugging without an interactive host
 ```
 
-## Build & run
+## Build
 
-Needs an installed Cronopio SDK on `CMAKE_PREFIX_PATH` (build the Cronopio repo,
-then `cmake --install build --prefix <prefix>`).
+The build expects the [Cronopio](https://github.com/Cronomantic/Cronopio) repo
+built alongside this one (its `sdk/`, `cronopio-cc` and headless/desktop hosts —
+see the paths at the top of `build_doom.sh`). Then:
 
 ```sh
-cmake -B build -DCMAKE_PREFIX_PATH=<cronopio-install-prefix>
-cmake --build build            # -> build/doom.bin
-cronopio build/doom.bin        # run on the desktop host
+bash build_doom.sh                              # -> doom.bin (bakes wads/freedoom1.wad)
+bash build_doom.sh wads/freedoom2.wad out.bin   # a different IWAD / output
 ```
 
-Or one-line, no CMake (SDK `bin/` on PATH):
+The IWAD is baked into the cartridge ROM (`--rom`); one WAD per `.bin`. The
+engine auto-detects the game (DOOM 1 vs DOOM 2) from the IWAD header, so the
+same code serves doom1/doom2/Freedoom — only the baked WAD changes.
+
+> The legacy `CMakeLists.txt` predates the multi-file build and is stale;
+> `build_doom.sh` is the current path. (Tooling to pick IWADs and name carts,
+> and integrating the SDK as a submodule, are tracked in `TODO.txt`.)
+
+## Run
+
+On the Cronopio desktop host (self-contained — no SDL2.dll, the SoundFont is
+embedded in the executable):
 
 ```sh
-cronopio-cc src/doom_cart.c -o doom.bin
-cronopio doom.bin
+Cronopio/build/host/desktop/cronopio.exe doom.bin
 ```
 
-See [`KICKOFF.md`](KICKOFF.md) for the port plan, the Cronopio constraints, and
-the `I_*`→syscall mapping.
+Headless (renders frames, no window — for testing / screenshots):
+
+```sh
+Cronopio/build/tools/headless/cronopio-headless.exe doom.bin <frames> [out.ppm]
+```
+
+## Notes
+
+The engine lives on a fork (`cronomantic/crispy-doom`, branch `cronopio-port`)
+carrying the `[cronopio]` patches; the submodule's origin is that fork. See
+`TODO.txt` for the open backlog and `repro/README.md` for the headless
+debugging harnesses.
