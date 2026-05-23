@@ -128,12 +128,15 @@ boolean I_SoundIsPlaying(int channel)
     return (int32_t)(g_sfx_end_ms[channel] - cron_time_ms()) > 0;
 }
 
-/* The host has no per-voice volume/pan update, so 3D repositioning of an
- * already-playing sound is not applied (sounds keep their trigger-time vol/pan).
- * SFX are short, so this is a minor fidelity loss; a cron_pcm_params syscall
- * could add it later. */
+/* Reposition an already-playing sound (DOOM calls this each tic as the source
+ * or listener moves). vol 0..127 -> 0..255, sep 0..255 (128=center) -> pan. */
 void I_UpdateSoundParams(int channel, int vol, int sep)
-{ (void)channel; (void)vol; (void)sep; }
+{
+    if (channel < 0 || channel >= CRON_SFX_CHANNELS) return;
+    int v   = vol * 255 / 127; if (v < 0) v = 0; if (v > 255) v = 255;
+    int pan = sep - 128;       if (pan < -128) pan = -128; if (pan > 127) pan = 127;
+    cron_pcm_params(channel, v, pan);
+}
 
 void I_UpdateSound(void) { }   /* host mixes; nothing to pump here */
 
