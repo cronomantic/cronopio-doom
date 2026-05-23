@@ -5,11 +5,36 @@
 # cvm-translate lowers to doom.bin. The IWAD is baked into ROM via --rom.
 set -u
 
-ROOT="/e/proyectos/cronopio-doom"
+# Resolve the repo root from this script's location so the build is portable
+# (no hard-coded absolute paths).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CR="$ROOT/third_party/crispy-doom/src"
-SDK="/e/proyectos/Cronopio/sdk"
-RT="/e/proyectos/Cronopio/external/CronoVM/runtime/lib"
-CC="/e/proyectos/Cronopio/build/tools/cronopio-cc/cronopio-cc.exe"
+
+# The Cronopio SDK is a git submodule (third_party/Cronopio). If it hasn't been
+# checked out yet, initialise it (and its nested submodules: CronoVM, TinySoundFont).
+CRONOPIO="$ROOT/third_party/Cronopio"
+if [[ ! -f "$CRONOPIO/CMakeLists.txt" ]]; then
+  echo "[build] Cronopio submodule missing — initialising..."
+  git -C "$ROOT" submodule update --init --recursive third_party/Cronopio || {
+    echo "[build] ERROR: could not init the Cronopio submodule." >&2; exit 1; }
+fi
+
+SDK="$CRONOPIO/sdk"
+RT="$CRONOPIO/external/CronoVM/runtime/lib"
+CRBUILD="$CRONOPIO/build"
+CC="$CRBUILD/tools/cronopio-cc/cronopio-cc.exe"
+
+# The cart compiler is a built artifact; auto-build the SDK tools (and the host
+# binaries used to run the cart) if it's missing.
+if [[ ! -x "$CC" ]]; then
+  echo "[build] cronopio-cc not found — building Cronopio SDK tools (one-time)..."
+  if [[ ! -f "$CRBUILD/build.ninja" ]]; then
+    cmake -S "$CRONOPIO" -B "$CRBUILD" -G Ninja || {
+      echo "[build] ERROR: cmake configure of Cronopio failed." >&2; exit 1; }
+  fi
+  ninja -C "$CRBUILD" cronopio-cc cronopio cronopio-headless || {
+    echo "[build] ERROR: building Cronopio tools failed." >&2; exit 1; }
+fi
 
 IWAD="${1:-$ROOT/wads/freedoom1.wad}"
 OUT="${2:-$ROOT/doom.bin}"

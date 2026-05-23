@@ -26,6 +26,7 @@ src/
   m_fixed_cvm.c      i64 fixed-point helpers via CronoVM intrinsic opcodes
 compat/              tiny SDL_*/headers shims so the vendored tree builds unmodified
 third_party/crispy-doom   the engine (submodule, branch cronopio-port)
+third_party/Cronopio      the console SDK + hosts (submodule; nested CronoVM, TinySoundFont)
 wads/                IWADs baked into carts (freedoom1.wad, freedoom2.wad)
 build_doom.sh        the build (cvm-cc compiles every .c, llvm-links, cvm-translate)
 repro/               headless harnesses for debugging without an interactive host
@@ -33,22 +34,30 @@ repro/               headless harnesses for debugging without an interactive hos
 
 ## Build
 
-The build expects the [Cronopio](https://github.com/Cronomantic/Cronopio) repo
-built alongside this one (its `sdk/`, `cronopio-cc` and headless/desktop hosts —
-see the paths at the top of `build_doom.sh`). Then:
+Everything is self-contained via submodules — clone recursively (or init after):
+
+```sh
+git clone --recurse-submodules <this repo>
+# or, in an existing checkout:
+git submodule update --init --recursive
+```
+
+Then:
 
 ```sh
 bash build_doom.sh                              # -> doom.bin (bakes wads/freedoom1.wad)
 bash build_doom.sh wads/freedoom2.wad out.bin   # a different IWAD / output
 ```
 
+The first run auto-builds the Cronopio SDK tools and hosts under
+`third_party/Cronopio/build` (one-time; needs CMake + Ninja + a C compiler).
 The IWAD is baked into the cartridge ROM (`--rom`); one WAD per `.bin`. The
 engine auto-detects the game (DOOM 1 vs DOOM 2) from the IWAD header, so the
 same code serves doom1/doom2/Freedoom — only the baked WAD changes.
 
 > The legacy `CMakeLists.txt` predates the multi-file build and is stale;
-> `build_doom.sh` is the current path. (Tooling to pick IWADs and name carts,
-> and integrating the SDK as a submodule, are tracked in `TODO.txt`.)
+> `build_doom.sh` is the current path. (Tooling to pick IWADs and name carts
+> is tracked in `TODO.txt`.)
 
 ## Run
 
@@ -56,13 +65,13 @@ On the Cronopio desktop host (self-contained — no SDL2.dll, the SoundFont is
 embedded in the executable):
 
 ```sh
-Cronopio/build/host/desktop/cronopio.exe doom.bin
+third_party/Cronopio/build/host/desktop/cronopio.exe doom.bin
 ```
 
 Headless (renders frames, no window — for testing / screenshots):
 
 ```sh
-Cronopio/build/tools/headless/cronopio-headless.exe doom.bin <frames> [out.ppm]
+third_party/Cronopio/build/tools/headless/cronopio-headless.exe doom.bin <frames> [out.ppm]
 ```
 
 ## Notes
