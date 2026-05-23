@@ -22,6 +22,10 @@
 #include "memio.h"
 #include "mus2mid.h"
 #include "midifile.h"
+#include "w_wad.h"
+#include "deh_str.h"
+#include "m_misc.h"
+#include "z_zone.h"
 
 /* config vars normally bound by I_BindSoundVariables */
 int   snd_sfxdevice = 0;       /* SNDDEVICE_NONE */
@@ -35,19 +39,103 @@ char *snd_dmxoption = "";
 int   use_libsamplerate = 0;
 float libsamplerate_scale = 0.65f;
 
-/* ---- sfx (still stubbed) ----------------------------------------------- */
+/* ---- sfx: DMX DS* lumps -> host PCM voices ----------------------------- */
+/* DOOM SFX are 8-bit unsigned mono PCM (DMX format), played straight from the
+ * WAD in cart ROM with cron_sample_u8 + cron_pcm — no copy/convert. Each DOOM
+ * sound channel maps 1:1 to a host voice (music uses the MIDI synth, so all
+ * voices are free for SFX). The host captures the sample descriptor at trigger
+ * time, so a single scratch sample slot can be reused for every sound. */
+
+#define CRON_SFX_CHANNELS  16     /* host voice count */
+#define CRON_SFX_SLOT      0      /* scratch sample bank, reused per trigger */
+
+int use_sfx_prefix = 1;           /* DOOM prefixes sound lumps with "ds" */
+
+static uint32_t g_sfx_end_ms[CRON_SFX_CHANNELS];  /* when each channel goes idle */
+
 void I_InitSound(GameMission_t mission) { (void)mission; }
 void I_ShutdownSound(void) { }
-int  I_GetSfxLumpNum(sfxinfo_t *sfxinfo) { (void)sfxinfo; return 0; }
-void I_UpdateSound(void) { }
+
+static void sfx_lump_name(sfxinfo_t *sfx, char *buf, size_t n)
+{
+    if (sfx->link) sfx = sfx->link;
+    if (use_sfx_prefix) M_snprintf(buf, n, "ds%s", DEH_String(sfx->name));
+    else                M_StringCopy(buf, DEH_String(sfx->name), n);
+}
+
+int I_GetSfxLumpNum(sfxinfo_t *sfxinfo)
+{
+    char buf[9];
+    sfx_lump_name(sfxinfo, buf, sizeof(buf));
+    return W_CheckNumForName(buf);
+}
+
+void I_PrecacheSounds(sfxinfo_t *sounds, int num_sounds)
+{
+    char buf[9];
+    for (int i = 0; i < num_sounds; ++i)
+    {
+        sfx_lump_name(&sounds[i], buf, sizeof(buf));
+        sounds[i].lumpnum = W_CheckNumForName(buf);
+    }
+}
+
+int I_StartSound(sfxinfo_t *sfxinfo, int channel, int vol, int sep, int pitch)
+{
+    if (channel < 0 || channel >= CRON_SFX_CHANNELS) return -1;
+    int lumpnum = sfxinfo->lumpnum;
+    if (lumpnum < 0) return -1;
+
+    byte *data   = (byte *)W_CacheLumpNum(lumpnum, PU_STATIC);  /* ROM, persistent */
+    int   lumplen = W_LumpLength(lumpnum);
+
+    /* DMX header: format 0x03, 16-bit rate, 32-bit length; 16 pad bytes each end. */
+    if (lumplen < 8 || data[0] != 0x03 || data[1] != 0x00) return -1;
+    int rate   = data[2] | (data[3] << 8);
+    int length = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
+    if (rate <= 0 || length > lumplen - 8 || length <= 48) return -1;
+
+    byte *samples = data + 16;     /* skip the 16-byte lead pad (DMX behaviour) */
+    int   slen    = length - 32;   /* and the 16-byte trail pad */
+    if (slen <= 0) return -1;
+
+    int pq16 = (pitch <= 0) ? 0x10000 : (pitch * 0x10000 / 128);  /* 128 = native */
+    int v    = vol * 255 / 127; if (v < 0) v = 0; if (v > 255) v = 255;
+    int pan  = sep - 128;       if (pan < -128) pan = -128; if (pan > 127) pan = 127;
+
+    cron_sample_u8(CRON_SFX_SLOT, (const uint8_t *)samples, slen, rate);
+    cron_pcm(channel, CRON_SFX_SLOT, pq16, v, pan, 0);
+
+    /* Track playback end so I_SoundIsPlaying can report channel idle (the host
+     * exposes no per-voice query). Duration scales inversely with pitch. */
+    int dur_ms = slen * 1000 / rate;
+    if (pitch > 0) dur_ms = dur_ms * 128 / pitch;
+    g_sfx_end_ms[channel] = cron_time_ms() + (uint32_t)dur_ms;
+
+    return channel;   /* the handle is the channel */
+}
+
+void I_StopSound(int channel)
+{
+    if (channel < 0 || channel >= CRON_SFX_CHANNELS) return;
+    cron_snd_stop(channel);
+    g_sfx_end_ms[channel] = 0;
+}
+
+boolean I_SoundIsPlaying(int channel)
+{
+    if (channel < 0 || channel >= CRON_SFX_CHANNELS) return false;
+    return (int32_t)(g_sfx_end_ms[channel] - cron_time_ms()) > 0;
+}
+
+/* The host has no per-voice volume/pan update, so 3D repositioning of an
+ * already-playing sound is not applied (sounds keep their trigger-time vol/pan).
+ * SFX are short, so this is a minor fidelity loss; a cron_pcm_params syscall
+ * could add it later. */
 void I_UpdateSoundParams(int channel, int vol, int sep)
 { (void)channel; (void)vol; (void)sep; }
-int  I_StartSound(sfxinfo_t *sfxinfo, int channel, int vol, int sep, int pitch)
-{ (void)sfxinfo; (void)channel; (void)vol; (void)sep; (void)pitch; return -1; }
-void I_StopSound(int channel) { (void)channel; }
-boolean I_SoundIsPlaying(int channel) { (void)channel; return false; }
-void I_PrecacheSounds(sfxinfo_t *sounds, int num_sounds)
-{ (void)sounds; (void)num_sounds; }
+
+void I_UpdateSound(void) { }   /* host mixes; nothing to pump here */
 
 /* ---- music: MUS/MIDI sequencer feeding the host synth ------------------ */
 
