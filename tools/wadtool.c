@@ -12,11 +12,19 @@
  *         runnable = 1 if the crispy-doom engine can run it, else 0
  *
  *   wadtool merge <out.wad> <iwad.wad> [pwad.wad ...]
- *       Concatenate the inputs' lumps in order (IWAD first, then each PWAD)
- *       into one IWAD. DOOM resolves a name to the LAST matching lump, so
- *       appended PWAD lumps override the IWAD's — reproducing vanilla `-file`
- *       order for maps, DEHACKED and by-name replacements. (DeuTex-style
- *       insertion of NEW flats/sprites into marker namespaces is NOT handled.)
+ *       Merge the PWADs into the IWAD (DeuTex/`-merge` semantics) and write one
+ *       IWAD. This is a port of crispy-doom's w_merge.c DoMerge applied offline
+ *       and iteratively (one PWAD at a time, as the engine's W_MergeFile does):
+ *         - New/replacement FLATS are inserted into the IWAD's F_START..F_END
+ *           range (from the PWAD's F_/FF_ section) so the contiguous flat range
+ *           vanilla relies on stays intact.
+ *         - New/replacement SPRITES are merged per frame/rotation into the
+ *           S_START..S_END range (full sprite-frame logic from w_merge.c).
+ *         - Everything else (maps, TEXTURE1/PNAMES, sounds, music, DEHACKED,
+ *           by-name patch replacements) is appended; DOOM resolves a name to
+ *           the LAST match, so the PWAD wins — vanilla `-file` order.
+ *       For a maps-only / by-name-replacement PWAD (no F_/S_ sections) this
+ *       reduces to plain concatenation, identical to the old behaviour.
  *
  * WAD format: 12-byte header (4-byte magic "IWAD"/"PWAD", int32 numlumps,
  * int32 dir offset, little-endian) + a directory of 16-byte entries
@@ -164,66 +172,260 @@ static int cmd_identify(const char *path) {
     return 0;
 }
 
+/* ---- DeuTex-style namespace merge (port of crispy-doom w_merge.c) -------- */
+
+typedef struct { lump_t **lumps; int numlumps; } searchlist_t;
+
+typedef struct {
+    char sprname[4];
+    char frame;
+    lump_t *angle_lumps[8];
+} sprite_frame_t;
+
+static searchlist_t iwad, pwad;
+static searchlist_t iwad_flats, iwad_sprites, pwad_flats, pwad_sprites;
+static sprite_frame_t *sprite_frames;
+static int num_sprite_frames, sprite_frames_alloced;
+
+/* Lump names are uppercased on read and the literals here are uppercase, so a
+ * plain strncmp suffices (no need for POSIX strncasecmp / <strings.h>). */
+static int nmeq(const char *a, const char *b) { return strncmp(a, b, 8) == 0; }
+
+static int find_in_list(searchlist_t *list, const char *name) {
+    for (int i = 0; i < list->numlumps; ++i)
+        if (nmeq(list->lumps[i]->name, name)) return i;
+    return -1;
+}
+
+static int setup_list(searchlist_t *list, searchlist_t *src,
+                      const char *s1, const char *e1,
+                      const char *s2, const char *e2) {
+    list->numlumps = 0;
+    int start = find_in_list(src, s1);
+    if (s2 && start < 0) start = find_in_list(src, s2);
+    if (start >= 0) {
+        int end = find_in_list(src, e1);
+        if (e2 && end < 0) end = find_in_list(src, e2);
+        if (end > start) {
+            list->lumps = src->lumps + start + 1;
+            list->numlumps = end - start - 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int setup_lists(void) {
+    if (!setup_list(&iwad_flats, &iwad, "F_START", "F_END", NULL, NULL)) return 0;
+    if (!setup_list(&iwad_sprites, &iwad, "S_START", "S_END", NULL, NULL)) return 0;
+    setup_list(&pwad_flats, &pwad, "F_START", "F_END", "FF_START", "FF_END");
+    setup_list(&pwad_sprites, &pwad, "S_START", "S_END", "SS_START", "SS_END");
+    return 1;
+}
+
+static void init_sprite_list(void) {
+    if (!sprite_frames) {
+        sprite_frames_alloced = 128;
+        sprite_frames = malloc(sizeof(*sprite_frames) * sprite_frames_alloced);
+    }
+    num_sprite_frames = 0;
+}
+
+static int valid_sprite_name(const char *name) {
+    if (!name[0] || !name[1] || !name[2] || !name[3]) return 0;
+    if (!name[4] || !isdigit((unsigned char)name[5])) return 0;
+    if (name[6] && !isdigit((unsigned char)name[7])) return 0;
+    return 1;
+}
+
+static sprite_frame_t *find_sprite_frame(const char *name, int frame) {
+    for (int i = 0; i < num_sprite_frames; ++i) {
+        sprite_frame_t *cur = &sprite_frames[i];
+        if (!strncmp(cur->sprname, name, 4) && cur->frame == frame) return cur;
+    }
+    if (num_sprite_frames >= sprite_frames_alloced) {
+        sprite_frames_alloced *= 2;
+        sprite_frames = realloc(sprite_frames,
+                                sprite_frames_alloced * sizeof(*sprite_frames));
+    }
+    sprite_frame_t *r = &sprite_frames[num_sprite_frames++];
+    memcpy(r->sprname, name, 4);
+    r->frame = (char)frame;
+    for (int i = 0; i < 8; ++i) r->angle_lumps[i] = NULL;
+    return r;
+}
+
+static int sprite_lump_needed(lump_t *lump) {
+    if (!valid_sprite_name(lump->name)) return 1;
+    sprite_frame_t *sp = find_sprite_frame(lump->name, lump->name[4]);
+    int a = lump->name[5] - '0';
+    if (a == 0) { for (int i = 0; i < 8; ++i) if (sp->angle_lumps[i] == lump) return 1; }
+    else if (sp->angle_lumps[a - 1] == lump) return 1;
+    if (lump->name[6] == '\0') return 0;
+    sp = find_sprite_frame(lump->name, lump->name[6]);
+    a = lump->name[7] - '0';
+    if (a == 0) { for (int i = 0; i < 8; ++i) if (sp->angle_lumps[i] == lump) return 1; }
+    else if (sp->angle_lumps[a - 1] == lump) return 1;
+    return 0;
+}
+
+static void add_sprite_lump(lump_t *lump) {
+    if (!valid_sprite_name(lump->name)) return;
+    sprite_frame_t *sp = find_sprite_frame(lump->name, lump->name[4]);
+    int a = lump->name[5] - '0';
+    if (a == 0) { for (int i = 0; i < 8; ++i) sp->angle_lumps[i] = lump; }
+    else sp->angle_lumps[a - 1] = lump;
+    if (lump->name[6] == '\0') return;
+    sp = find_sprite_frame(lump->name, lump->name[6]);
+    a = lump->name[7] - '0';
+    if (a == 0) { for (int i = 0; i < 8; ++i) sp->angle_lumps[i] = lump; }
+    else sp->angle_lumps[a - 1] = lump;
+}
+
+static void generate_sprite_list(void) {
+    init_sprite_list();
+    for (int i = 0; i < iwad_sprites.numlumps; ++i) add_sprite_lump(iwad_sprites.lumps[i]);
+    for (int i = 0; i < pwad_sprites.numlumps; ++i) add_sprite_lump(pwad_sprites.lumps[i]);
+}
+
+enum { SEC_NORMAL, SEC_FLATS, SEC_SPRITES };
+
+/* Merge one PWAD into iwad_lumps; returns a fresh lump_t* array (caller frees). */
+static lump_t **do_merge(lump_t **iwad_lumps, int iwad_n,
+                         lump_t **pwad_lumps, int pwad_n, int *out_n) {
+    iwad.lumps = iwad_lumps; iwad.numlumps = iwad_n;
+    pwad.lumps = pwad_lumps; pwad.numlumps = pwad_n;
+    if (!setup_lists()) { *out_n = -1; return NULL; }  /* no F_/S_ in IWAD */
+    generate_sprite_list();
+
+    lump_t **out = calloc((size_t)(iwad_n + pwad_n), sizeof(lump_t *));
+    int n = 0, sec = SEC_NORMAL;
+
+    for (int i = 0; i < iwad_n; ++i) {
+        lump_t *lump = iwad_lumps[i];
+        if (sec == SEC_NORMAL) {
+            if (nmeq(lump->name, "F_START")) sec = SEC_FLATS;
+            else if (nmeq(lump->name, "S_START")) sec = SEC_SPRITES;
+            out[n++] = lump;
+        } else if (sec == SEC_FLATS) {
+            if (nmeq(lump->name, "F_END")) {
+                for (int k = 0; k < pwad_flats.numlumps; ++k) out[n++] = pwad_flats.lumps[k];
+                out[n++] = lump;
+                sec = SEC_NORMAL;
+            } else if (find_in_list(&pwad_flats, lump->name) < 0) {
+                out[n++] = lump;  /* IWAD-only flat: keep */
+            }
+        } else { /* SEC_SPRITES */
+            if (nmeq(lump->name, "S_END")) {
+                for (int k = 0; k < pwad_sprites.numlumps; ++k)
+                    if (sprite_lump_needed(pwad_sprites.lumps[k])) out[n++] = pwad_sprites.lumps[k];
+                out[n++] = lump;
+                sec = SEC_NORMAL;
+            } else if (sprite_lump_needed(lump)) {
+                out[n++] = lump;  /* IWAD sprite frame not replaced: keep */
+            }
+        }
+    }
+
+    sec = SEC_NORMAL;
+    for (int i = 0; i < pwad_n; ++i) {
+        lump_t *lump = pwad_lumps[i];
+        if (sec == SEC_NORMAL) {
+            if (nmeq(lump->name, "F_START") || nmeq(lump->name, "FF_START")) sec = SEC_FLATS;
+            else if (nmeq(lump->name, "S_START") || nmeq(lump->name, "SS_START")) sec = SEC_SPRITES;
+            else out[n++] = lump;  /* maps, TEXTUREx/PNAMES, sounds, DEH, ... */
+        } else if (sec == SEC_FLATS) {
+            if (nmeq(lump->name, "FF_END") || nmeq(lump->name, "F_END")) sec = SEC_NORMAL;
+        } else { /* SEC_SPRITES */
+            if (nmeq(lump->name, "SS_END") || nmeq(lump->name, "S_END")) sec = SEC_NORMAL;
+        }
+    }
+
+    *out_n = n;
+    return out;
+}
+
+static int write_wad(const char *out_path, lump_t **lumps, int n) {
+    FILE *f = fopen(out_path, "wb");
+    if (!f) { fprintf(stderr, "[wadtool] cannot write %s\n", out_path); return 1; }
+
+    int32_t cur = 12;
+    for (int i = 0; i < n; ++i) cur += lumps[i]->size;
+    int32_t infotableofs = cur;
+
+    unsigned char hdr[12];
+    memcpy(hdr, "IWAD", 4);
+    wr32(hdr + 4, n);
+    wr32(hdr + 8, infotableofs);
+    fwrite(hdr, 1, 12, f);
+
+    for (int i = 0; i < n; ++i)
+        if (lumps[i]->size > 0) fwrite(lumps[i]->data, 1, (size_t)lumps[i]->size, f);
+
+    cur = 12;
+    for (int i = 0; i < n; ++i) {
+        unsigned char ent[16];
+        if (lumps[i]->size > 0) { wr32(ent, cur); cur += lumps[i]->size; }
+        else wr32(ent, 0);
+        wr32(ent + 4, lumps[i]->size);
+        memset(ent + 8, 0, 8);
+        memcpy(ent + 8, lumps[i]->name, strnlen(lumps[i]->name, 8));
+        fwrite(ent, 1, 16, f);
+    }
+    fclose(f);
+    return 0;
+}
+
+/* Concatenation fallback (when DeuTex merge can't run): all lumps in order. */
+static lump_t **concat(lump_t **acc, int acc_n, wad_t *p, int *out_n) {
+    lump_t **out = realloc(acc, (size_t)(acc_n + p->numlumps) * sizeof(lump_t *));
+    for (int32_t i = 0; i < p->numlumps; ++i) out[acc_n + i] = &p->lumps[i];
+    *out_n = acc_n + p->numlumps;
+    return out;
+}
+
 static int cmd_merge(const char *out_path, int n, char **inputs) {
     wad_t *wads = calloc((size_t)n, sizeof(wad_t));
     if (!wads) return 1;
-    int32_t total = 0;
     for (int i = 0; i < n; i++) {
         if (read_wad(inputs[i], &wads[i]) != 0) {
             for (int k = 0; k < i; k++) free_wad(&wads[k]);
             free(wads); return 1;
         }
-        total += wads[i].numlumps;
     }
 
-    FILE *f = fopen(out_path, "wb");
-    if (!f) {
-        fprintf(stderr, "[wadtool] cannot write %s\n", out_path);
-        for (int i = 0; i < n; i++) free_wad(&wads[i]);
-        free(wads); return 1;
-    }
+    /* acc starts as the IWAD's lumps (as pointers). */
+    int acc_n = wads[0].numlumps;
+    lump_t **acc = calloc((size_t)acc_n, sizeof(lump_t *));
+    for (int i = 0; i < acc_n; ++i) acc[i] = &wads[0].lumps[i];
 
-    /* Layout: header(12) + lump data + directory. */
-    int32_t cur = 12;
-    for (int i = 0; i < n; i++)
-        for (int32_t j = 0; j < wads[i].numlumps; j++)
-            cur += wads[i].lumps[j].size;
-    int32_t infotableofs = cur;
+    int deutex = 0, concatd = 0;
+    for (int i = 1; i < n; ++i) {
+        lump_t **pptr = calloc((size_t)wads[i].numlumps, sizeof(lump_t *));
+        for (int32_t j = 0; j < wads[i].numlumps; ++j) pptr[j] = &wads[i].lumps[j];
 
-    unsigned char hdr[12];
-    memcpy(hdr, "IWAD", 4);
-    wr32(hdr + 4, total);
-    wr32(hdr + 8, infotableofs);
-    fwrite(hdr, 1, 12, f);
-
-    for (int i = 0; i < n; i++)
-        for (int32_t j = 0; j < wads[i].numlumps; j++)
-            if (wads[i].lumps[j].size > 0)
-                fwrite(wads[i].lumps[j].data, 1, (size_t)wads[i].lumps[j].size, f);
-
-    cur = 12;
-    for (int i = 0; i < n; i++) {
-        for (int32_t j = 0; j < wads[i].numlumps; j++) {
-            lump_t *L = &wads[i].lumps[j];
-            unsigned char ent[16];
-            if (L->size > 0) { wr32(ent, cur); cur += L->size; }
-            else { wr32(ent, 0); }
-            wr32(ent + 4, L->size);
-            memset(ent + 8, 0, 8);
-            memcpy(ent + 8, L->name, strnlen(L->name, 8));
-            fwrite(ent, 1, 16, f);
+        int merged_n = 0;
+        lump_t **merged = do_merge(acc, acc_n, pptr, wads[i].numlumps, &merged_n);
+        if (merged) {
+            free(acc); acc = merged; acc_n = merged_n; deutex++;
+        } else {
+            /* IWAD has no flat/sprite sections — fall back to concatenation. */
+            acc = concat(acc, acc_n, &wads[i], &acc_n); concatd++;
         }
+        free(pptr);
     }
-    fclose(f);
-    fprintf(stderr, "[wadtool] merged %d WAD(s), %d lumps -> %s\n",
-            n, (int)total, out_path);
+
+    int rc = write_wad(out_path, acc, acc_n);
+    fprintf(stderr, "[wadtool] merged %d WAD(s) -> %d lumps (%d DeuTex, %d concat) -> %s\n",
+            n, acc_n, deutex, concatd, out_path);
+    free(acc); free(sprite_frames); sprite_frames = NULL;
     for (int i = 0; i < n; i++) free_wad(&wads[i]);
     free(wads);
-    return 0;
+    return rc;
 }
 
 int main(int argc, char **argv) {
-    if (argc >= 3 && strcmp(argv[1], "identify") == 0 && argc == 3)
+    if (argc == 3 && strcmp(argv[1], "identify") == 0)
         return cmd_identify(argv[2]);
     if (argc >= 4 && strcmp(argv[1], "merge") == 0)
         return cmd_merge(argv[2], argc - 3, &argv[3]);

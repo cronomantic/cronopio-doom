@@ -78,9 +78,12 @@ doom2-mymaps  doom2.wad  maps.wad
 ```
 
 `tools/wadtool.c` (compiled on first use; no scripting-language dependency)
-does the identify/merge. PWAD merging is by lump concatenation (vanilla
-`-file` load order: maps/DEHACKED/by-name replacements win); DeuTex-style
-insertion of *new* flats/sprites into marker namespaces is not handled.
+does the identify/merge. PWAD merging follows DeuTex/`-merge` semantics (a port
+of crispy-doom's `w_merge.c`, applied offline and per-PWAD): new/replacement
+flats and sprites are merged into the IWAD's `F_START..F_END` / `S_START..S_END`
+ranges (so the contiguous ranges vanilla relies on stay intact), and everything
+else (maps, TEXTURE1/PNAMES, sounds, music, DEHACKED, by-name replacements) is
+appended with last-wins precedence — i.e. vanilla `-file` order.
 
 > The legacy `CMakeLists.txt` predates the multi-file build and is stale;
 > `build_doom.sh` is the current path.
