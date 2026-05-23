@@ -84,17 +84,10 @@ int CVM_CrossDiv(int a, int b, int c, int d, int divisor)
     uint32_t dv = (uint32_t)divisor;
     if (divisor < 0) { neg = !neg; dv = (uint32_t)(-divisor); }
 
-    /* restoring division of the 64-bit magnitude (num_hi:num_lo) by dv */
-    uint32_t uhi = (uint32_t)num_hi;
-    uint32_t q = 0, rem = 0;
-    for (int i = 63; i >= 0; --i)
-    {
-        uint32_t bit = (i >= 32) ? ((uhi >> (i - 32)) & 1u)
-                                 : ((num_lo >> i) & 1u);
-        rem = (rem << 1) | bit;
-        q <<= 1;
-        if (rem >= dv) { rem -= dv; q |= 1u; }
-    }
+    /* 64-bit magnitude (num_hi:num_lo) / dv in one host op via the QDIV6432
+     * opcode. Replaces a 64-iteration software restoring division; the quotient
+     * is truncated to 32 bits, bit-identical to the old loop (q was uint32_t). */
+    uint32_t q = cvm_qdiv_64_32((uint32_t)num_hi, num_lo, dv);
 
     return neg ? -(int32_t)q : (int32_t)q;
 }
