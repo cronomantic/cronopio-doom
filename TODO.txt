@@ -1,5 +1,7 @@
 - [HECHO 2026-05-23] refactorizar cronopio para eliminar el reproductor de MODs de protracker
 - Integrar correctamente cronopio SDK como un submodulo.
 - Facilidad para crear cartuchos para diferentes IWADs oficiales, FreeDoom y con los el que el usuario quiera usar, dándoles un nombre apropiado.
+  (Aclaración: detectar los IWADs disponibles y crear un cartucho por juego del que tengas el WAD — DOOM1, DOOM2, Freedoom, Heretic, Hexen, etc. — además de soportar WADs complementarios.)
 - Poner algo en la pantalla del emulador durante la carga de DOOM en lugar de dejarla negra.
+- Arreglar el sistema de log de Cronopio (host sys_log): fuerza un salto de línea en cada llamada, así que un printf(".") sin '\n' sale en líneas separadas. Debería escribir tal cual (la barra de carga de DOOM son printf(".") en una sola línea).
 - [HECHO 2026-05-23] Limpiar documentos no necesarios u obsoletos aquí.

@@ -2,10 +2,62 @@
  * single cartridge translation unit (see doom_cart.c) — not built standalone. */
 #include "platform.h"
 
+/* ---- loading screen ---------------------------------------------------- */
+/* The engine's blocking startup (D_DoomMain: WAD load, R_Init, P_Init, ...)
+ * runs inside the cart entry, before the frame loop. We draw a splash + a
+ * progress bar straight into the Cronopio framebuffer and cron_present() it;
+ * the host's present hook flushes mid-entry. The bar is driven by the volume
+ * of startup log lines (no known total) via an asymptotic fill, throttled to
+ * present only when the filled width actually changes. */
+#define BOOT_BAR_X   40
+#define BOOT_BAR_Y   188
+#define BOOT_BAR_W   240
+#define BOOT_BAR_H   10
+#define BOOT_COL_BG   0      /* palette indices we set explicitly below */
+#define BOOT_COL_TRK  1
+#define BOOT_COL_BAR  2
+#define BOOT_COL_TXT  3
+
+static int g_booting;
+static int g_boot_lines;
+
+/* Full redraw + present. The engine overwrites the whole palette during boot
+ * (V_Init / I_SetPalette), so we re-assert our four palette entries every time,
+ * right before presenting — the draw is synchronous, so colours are correct at
+ * present. The bar is driven by startup-log volume (no known total), an
+ * asymptotic fill that never quite reaches the end until the game takes over. */
+static void boot_draw(void) {
+    cron_palette_set(BOOT_COL_BG,  0x000000);
+    cron_palette_set(BOOT_COL_TRK, 0x303030);
+    cron_palette_set(BOOT_COL_BAR, 0xB81818);   /* DOOM-ish red */
+    cron_palette_set(BOOT_COL_TXT, 0xC8C8C8);
+
+    cron_cls(BOOT_COL_BG);
+    cron_text("CRONOPIO-DOOM", 13, (CRON_SCREEN_W - 13 * 8) / 2, 96,  BOOT_COL_TXT);
+    cron_text("LOADING",        7, (CRON_SCREEN_W -  7 * 8) / 2, 168, BOOT_COL_TXT);
+
+    int inner = BOOT_BAR_W - 4;
+    int w = inner * g_boot_lines / (g_boot_lines + 8);    /* asymptotic */
+    cron_rect(BOOT_BAR_X, BOOT_BAR_Y, BOOT_BAR_W, BOOT_BAR_H, BOOT_COL_TRK);
+    if (w > 0) cron_rect(BOOT_BAR_X + 2, BOOT_BAR_Y + 2, w, BOOT_BAR_H - 4, BOOT_COL_BAR);
+    cron_present();
+}
+
+void plat_boot_begin(void) {
+    g_booting    = 1;
+    g_boot_lines = 0;
+    boot_draw();
+}
+
+void plat_boot_end(void) {
+    g_booting = 0;
+}
+
 void plat_log(const char *s) {
     int n = 0;
     while (s[n]) ++n;
     cron_log(s, n);
+    if (g_booting) { ++g_boot_lines; boot_draw(); }
 }
 
 uint32_t plat_time_ms(void) {

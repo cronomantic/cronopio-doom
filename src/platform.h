@@ -51,6 +51,13 @@ void     plat_init(void);
 void     plat_log(const char *s);                      /* NUL-terminated -> cron_log */
 uint32_t plat_time_ms(void);
 
+/* Loading screen. plat_boot_begin() draws an initial splash; while booting,
+ * plat_log() advances a progress bar (the engine's startup log is the progress
+ * source) and flushes via cron_present. plat_boot_end() leaves booting mode so
+ * the game's frames take over. Wrap the blocking engine init between them. */
+void     plat_boot_begin(void);
+void     plat_boot_end(void);
+
 /* The Cronopio framebuffer region (CRON_FB), resolved at cart init. The engine
  * renders DOOM_W*DOOM_H directly into it (I_VideoBuffer aliases this) so the
  * GPU rasteriser accelerators (cron_tcol/tspan, which write CRON_FB) and the

@@ -12,7 +12,9 @@
 static void setup(void)
 {
     plat_init();
+    plat_boot_begin();   /* loading screen: engine_init() blocks for seconds */
     engine_init();
+    plat_boot_end();
 }
 
 static void frame(void)
