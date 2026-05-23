@@ -55,9 +55,35 @@ The IWAD is baked into the cartridge ROM (`--rom`); one WAD per `.bin`. The
 engine auto-detects the game (DOOM 1 vs DOOM 2) from the IWAD header, so the
 same code serves doom1/doom2/Freedoom — only the baked WAD changes.
 
+### Building carts for every game you have
+
+Drop your IWADs into `wads/` and run:
+
+```sh
+bash make_carts.sh                          # one dist/<game>.bin per IWAD found
+```
+
+It identifies each WAD (DOOM, DOOM 2, TNT, Plutonia, Freedoom, FreeDM, Chex)
+and names the cart accordingly; non-DOOM-engine IWADs (Heretic/Hexen) are
+detected and skipped. Supplementary PWADs are merged into the IWAD and baked as
+one ROM — either on the command line or via a manifest:
+
+```sh
+bash make_carts.sh mymaps doom2.wad maps.wad deh.wad   # one custom cart
+```
+
+```text
+# wads/carts.txt — "<name> <iwad> [pwad...]" (paths relative to wads/)
+doom2-mymaps  doom2.wad  maps.wad
+```
+
+`tools/wadtool.c` (compiled on first use; no scripting-language dependency)
+does the identify/merge. PWAD merging is by lump concatenation (vanilla
+`-file` load order: maps/DEHACKED/by-name replacements win); DeuTex-style
+insertion of *new* flats/sprites into marker namespaces is not handled.
+
 > The legacy `CMakeLists.txt` predates the multi-file build and is stale;
-> `build_doom.sh` is the current path. (Tooling to pick IWADs and name carts
-> is tracked in `TODO.txt`.)
+> `build_doom.sh` is the current path.
 
 ## Run
 

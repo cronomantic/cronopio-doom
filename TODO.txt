@@ -1,7 +1,9 @@
 - [HECHO 2026-05-23] refactorizar cronopio para eliminar el reproductor de MODs de protracker
 - [HECHO 2026-05-23] Integrar correctamente cronopio SDK como un submodulo. (third_party/Cronopio, con CronoVM y TinySoundFont anidados; build_doom.sh resuelve rutas relativas y auto-construye las herramientas si faltan.)
-- Facilidad para crear cartuchos para diferentes IWADs oficiales, FreeDoom y con los el que el usuario quiera usar, dándoles un nombre apropiado.
+- [HECHO 2026-05-23] Facilidad para crear cartuchos para diferentes IWADs oficiales, FreeDoom y con el que el usuario quiera usar, dándoles un nombre apropiado.
   (Aclaración: detectar los IWADs disponibles y crear un cartucho por juego del que tengas el WAD — DOOM1, DOOM2, Freedoom, Heretic, Hexen, etc. — además de soportar WADs complementarios.)
+  Hecho con: tools/wadtool.c (identify/merge, sin dependencias nuevas — se compila al vuelo) + make_carts.sh (auto un cart por IWAD en wads/, o vía manifiesto wads/carts.txt para combos IWAD+PWAD; merge por concatenación). Solo motor DOOM por ahora (DOOM1/2, TNT, Plutonia, Freedoom, FreeDM, Chex).
+- [FUTURO] Soporte para Heretic, Hexen y Strife: requieren portar los motores crispy-heretic / crispy-hexen / crispy-strife (el port actual es crispy-doom). wadtool.c ya los detecta y make_carts.sh los salta con aviso de "no runnable". El merge de PWADs tipo DeuTex (flats/sprites NUEVOS en namespaces con marcadores) tampoco está cubierto por el merge por concatenación.
 - Poner algo en la pantalla del emulador durante la carga de DOOM en lugar de dejarla negra.
 - [HECHO 2026-05-23] Arreglar el sistema de log de Cronopio (host sys_log): fuerza un salto de línea en cada llamada, así que un printf(".") sin '\n' sale en líneas separadas. Debería escribir tal cual (la barra de carga de DOOM son printf(".") en una sola línea).
 - [HECHO 2026-05-23] Limpiar documentos no necesarios u obsoletos aquí.
