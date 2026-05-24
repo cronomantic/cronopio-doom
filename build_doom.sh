@@ -102,6 +102,13 @@ PORT=(
 echo "[build] $(( ${#SOURCES[@]} + ${#PORT[@]} )) translation units -> $OUT"
 echo "[build] IWAD: $IWAD"
 
+# Optional cartridge metadata (CVM_SEC_META): the host launcher shows these.
+# Populated by make_carts.sh; harmless when unset.
+META_ARGS=()
+[[ -n "${CART_TITLE:-}"    ]] && META_ARGS+=( --title="$CART_TITLE" )
+[[ -n "${CART_AUTHOR:-}"   ]] && META_ARGS+=( --author="$CART_AUTHOR" )
+[[ -n "${CART_CONTROLS:-}" ]] && META_ARGS+=( --controls="$CART_CONTROLS" )
+
 "$CC" \
   "${INCS[@]}" \
   "${SOURCES[@]}" \
@@ -109,4 +116,5 @@ echo "[build] IWAD: $IWAD"
   --rom="$IWAD" \
   --heap-reserve=96M \
   --stack-reserve=4M \
+  ${META_ARGS[@]+"${META_ARGS[@]}"} \
   -o "$OUT"

@@ -45,10 +45,18 @@
   y una de "input" que muestre el pad de 12 botones + hints en pantalla.
 
 # --- PX (jugador) ---
-- [FUTURO][PX][ALTA] Metadata de cartucho (header en ROM: título, autor, ayuda
-  de controles, thumbnail). Hoy un .bin es anónimo y nadie sabe los controles.
-  El browser F1 mostraría una "estantería" y enseñaría los controles al cargar.
-  Mayor win de PX por esfuerzo.
+- [HECHO 2026-05-24][PX] Metadata de cartucho + extensión .crom. Nueva sección
+  CVM_SEC_META (host-only, espejo de --rom): título/autor/controles. Pipeline:
+  cronopio-cc --title/--author/--controls -> blob "CMTA" -> translator --meta=;
+  CronoVM expone cvm_peek_section() para leerla SIN cargar el cart. Host: el
+  browser F1 lista el título y muestra autor+controles del cart enfocado en el
+  footer (lector dirigido, sin cargar el .crom de ~28MB); filtro de extensión
+  ahora .crom (+ .bin transitorio). make_carts.sh genera dist/*.crom con
+  título=juego + controles DOOM. build_doom.sh toma CART_TITLE/CART_CONTROLS por
+  env. Verificado: freedoom1.crom construye, lleva la META y arranca. docs/
+  cartridge.md actualizado. FUTURO: thumbnail en la META; overlay de controles
+  in-game al cargar (hoy se ven en el browser); macro CRONOPIO_CART_META en C
+  para carts escritos a mano.
 - [FUTURO][PX] Niceties de host estilo emulador: screenshot a PNG con hotkey,
   pausa/fast-forward, fullscreen + escalado entero.
 - [FUTURO][PX] Filtro CRT opcional (scanlines/curvatura). Identidad visual de

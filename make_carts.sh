@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build one Cronopio DOOM cartridge per game you have a WAD for.
 #
-# Scans wads/ and builds a nicely-named .bin per IWAD into dist/. Supplementary
+# Scans wads/ and builds a nicely-named .crom per IWAD into dist/. Supplementary
 # PWADs are supported via a manifest (wads/carts.txt) or on the command line;
 # they're merged into the IWAD (see tools/wadtool.py) and baked as one ROM.
 #
@@ -17,6 +17,9 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WADS="$ROOT/wads"
 DIST="$ROOT/dist"
+
+# Shared controls help baked into every DOOM cart's metadata (12-button pad).
+DOOM_CONTROLS="D-pad: mover/girar | L/R: strafe | A: disparar | B: usar | X/Y: arma | Start: menu | Select: mapa"
 WADTOOL_SRC="$ROOT/tools/wadtool.c"
 WADTOOL="$ROOT/tools/wadtool.exe"
 BUILD="$ROOT/build_doom.sh"
@@ -52,7 +55,7 @@ build_one() {
   local name="$1"; shift
   local iwad; iwad="$(resolve_wad "$1")" || { echo "  ! IWAD not found: $1" >&2; return 1; }
   shift
-  local out="$DIST/$name.bin"
+  local out="$DIST/$name.crom"
   local rom="$iwad"
 
   if (( $# > 0 )); then
@@ -67,8 +70,9 @@ build_one() {
     "$WADTOOL" merge "$rom" "$iwad" "${pwads[@]}" || return 1
   fi
 
-  echo "  building $name.bin (rom: $(basename "$rom"))"
-  bash "$BUILD" "$rom" "$out" >/dev/null 2>"$DIST/$name.build.log" || {
+  echo "  building $name.crom (rom: $(basename "$rom"))"
+  CART_TITLE="$name" CART_CONTROLS="$DOOM_CONTROLS" \
+    bash "$BUILD" "$rom" "$out" >/dev/null 2>"$DIST/$name.build.log" || {
     echo "  ! build failed — see $DIST/$name.build.log" >&2; return 1; }
   echo "  -> $out"
   return 0
