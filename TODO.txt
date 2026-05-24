@@ -59,6 +59,14 @@
   para carts escritos a mano.
 - [FUTURO][PX] Niceties de host estilo emulador: screenshot a PNG con hotkey,
   pausa/fast-forward, fullscreen + escalado entero.
+- [FUTURO][PX] Opciones de configuración del host (cronopio.exe), cada una como
+  PARÁMETRO de línea de comandos Y dentro del GUI (menú F1, persistidas en
+  cronopio.cfg):
+  - Tamaño de ventana (ancho x alto / factor de escala).
+  - Pantalla completa (on/off) + escalado entero / aspect-ratio.
+  - VSync (on/off).
+  - Ruta de los ficheros de guardado (dónde se escriben los <cart>.sav; hoy
+    junto al cartucho — permitir un directorio configurable).
 - [FUTURO][PX] Filtro CRT opcional (scanlines/curvatura). Identidad visual de
   consola fantasía; win grande y barato.
 - [HECHO 2026-05-24][PX] Gestión de saves — DOOM guarda/carga de verdad
@@ -83,4 +91,12 @@
   (I_AtExit(M_SaveDefaults)) y lo recarga al arrancar. Gotcha: el ws-check
   c==' '||c=='\t'||... lo plegaba clang a un bit-test i24 (rango 9..32); reescrito
   como rango (c>=9&&c<=13)||c==32 para evitar el i24 que el translator rechaza.
-  FUTURO (saves): export/import del blob; tamaño de región declarable por-cart.
+- [HECHO 2026-05-24][PX] Saves: tamaño de región + export/import.
+  - Región: el blob ya no es fijo (8MB) — es malloc'd por-cart, AUTO-CRECE en
+    cron_save_write (y al cargar se dimensiona al <cart>.sav), tope 64MB. Nuevo
+    syscall cron_save_reserve(n) para que el cart la declare/preasigne. Verificado:
+    DOOM guarda/carga igual, la región crece sola de 64KB a ~61KB del slot.
+  - Export/import en el menú F1 del browser: E = backup (-> <cart>.sav.bak),
+    I = restore (<- .bak), Del = borrar; el footer muestra "Save: N KB".
+  FUTURO (saves): ninguno pendiente relevante (el .sav ya es un fichero portable
+  que el usuario puede copiar/compartir).
