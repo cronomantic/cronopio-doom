@@ -111,3 +111,12 @@
     izquierdo y cursor ">", regla en el footer, hints por pantalla mostrando A/B.
   (El menú sigue siendo modal/bloqueante y pausa el cart, como ya era.)
   PENDIENTE verificación interactiva (es GUI SDL; compila y la lógica es directa).
+- [HECHO 2026-05-24][PX/seguridad] Sello de cartucho (magic + checksum) + filtro
+  del navegador. Nueva sección CVM_SEC_SEAL (CronoVM): magic 'CRM1' + version +
+  crc32 de [0, seal_off); cvm-translate --seal la anexa y parchea el crc;
+  cvm_crc32/cvm_seal_check en libcvm. cronopio-cc sella SIEMPRE (cvm-cc --seal).
+  Host: el navegador F1 lista solo ficheros con extensión de cart Y magic de sello
+  válido (lectura dirigida barata, sin leer el .crom entero); al CARGAR se exige
+  magic+crc OK (estricto) además de fb/pal. Verificado: doom sellado -> seal_check=1,
+  manipular 1 byte -> -1; no-sellado -> 0 (oculto + rechazado); el sellado arranca
+  igual (loader ignora SEAL). Re-sellar los dist/*.crom: `bash make_carts.sh`.
