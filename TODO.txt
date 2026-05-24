@@ -96,7 +96,18 @@
     cron_save_write (y al cargar se dimensiona al <cart>.sav), tope 64MB. Nuevo
     syscall cron_save_reserve(n) para que el cart la declare/preasigne. Verificado:
     DOOM guarda/carga igual, la región crece sola de 64KB a ~61KB del slot.
-  - Export/import en el menú F1 del browser: E = backup (-> <cart>.sav.bak),
-    I = restore (<- .bak), Del = borrar; el footer muestra "Save: N KB".
+  - Export/import: ver la entrada del rediseño del GUI (ahora menu-driven, no
+    atajos de teclado).
   FUTURO (saves): ninguno pendiente relevante (el .sav ya es un fichero portable
   que el usuario puede copiar/compartir).
+- [HECHO 2026-05-24][PX] GUI del host menu-driven por el pad (no atajos de
+  teclado) + lavado visual. El joystick virtual es la entrada canónica, así que
+  la gestión por teclado no tiene sentido (targets sin teclado / embebidos):
+  - Nueva pantalla de acciones por-cartucho (SCR_CART) a la que entra el browser
+    al elegir un cart: Cargar / Back up save / Restore save / Erase save / Volver.
+    Navegable solo con el pad (d-pad + A/B); cabecera = título del cart + autor +
+    controles + tamaño del save. Eliminados los atajos de teclado E/I/Del.
+  - Visual: borde de panel, regla bajo la cabecera, barra de selección con acento
+    izquierdo y cursor ">", regla en el footer, hints por pantalla mostrando A/B.
+  (El menú sigue siendo modal/bloqueante y pausa el cart, como ya era.)
+  PENDIENTE verificación interactiva (es GUI SDL; compila y la lógica es directa).
