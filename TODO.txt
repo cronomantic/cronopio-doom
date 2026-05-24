@@ -75,5 +75,12 @@
   Verificado headless: round-trip de un cart de prueba; y DOOM E1M1 guardar ->
   doom.bin.sav (61KB, doomsav0.dsg) -> proceso nuevo -> Load muestra el slot ->
   carga al nivel. docs/syscalls.md actualizado.
-  FUTURO: fscanf sobre el RAM-FS (hoy config de crispy no recarga, usa defaults);
-  export/import del blob; tamaño de región declarable por-cart.
+- [HECHO 2026-05-24][PX] Config de texto persiste (continuación del memory card):
+  la libc ahora escribe a fichero en fprintf/vfprintf/fputs/fputc cuando el stream
+  != NULL (antes iban siempre a cron_log) e implementa fscanf real sobre el RAM-FS
+  (%s/%d/%i/%u/%x/%[set] con ancho y supresion). Verificado el round-trip exacto de
+  crispy ("%79s %99[^\n]": got=2). DOOM persiste su default.cfg al salir limpio
+  (I_AtExit(M_SaveDefaults)) y lo recarga al arrancar. Gotcha: el ws-check
+  c==' '||c=='\t'||... lo plegaba clang a un bit-test i24 (rango 9..32); reescrito
+  como rango (c>=9&&c<=13)||c==32 para evitar el i24 que el translator rechaza.
+  FUTURO (saves): export/import del blob; tamaño de región declarable por-cart.
