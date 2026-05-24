@@ -8,3 +8,58 @@
 - Poner algo en la pantalla del emulador durante la carga de DOOM en lugar de dejarla negra.
 - [HECHO 2026-05-23] Arreglar el sistema de log de Cronopio (host sys_log): fuerza un salto de línea en cada llamada, así que un printf(".") sin '\n' sale en líneas separadas. Debería escribir tal cual (la barra de carga de DOOM son printf(".") en una sola línea).
 - [HECHO 2026-05-23] Limpiar documentos no necesarios u obsoletos aquí.
+
+# ===========================================================================
+# Mejoras de experiencia (propuestas 2026-05-24). DX = programador, PX = jugador.
+# Ordenadas por apalancamiento estimado.
+# ===========================================================================
+
+# --- DX (programador) ---
+- [HECHO 2026-05-24][DX] Diagnósticos del translator (cvm-translate). CORRECCIÓN
+  de la premisa: NO había "stub silencioso" — el stub de 1 instrucción de am_map
+  era el cuerpo real de am_map_stub.c (build lo sustituía); el translator ya es
+  estricto (llamada a función indefinida => error "extern is not supported",
+  g_errors>0 => build falla), así que el flag --strict sobraba. Lo que faltaba
+  y se hizo: (1) file:line en TODOS los diagnósticos — cvm-cc compila con
+  -gline-tables-only y diag_v lee la debug-loc de la instrucción actual
+  (g_cur_inst), sin impacto en el .bin; (2) mensaje "unsupported intrinsic
+  'llvm.X'" para intrinsics sin lowering, en vez del genérico "extern not
+  supported". Verificado (file:line en error de call indefinida y en
+  llvm.fabs.f32). Documentado en CronoVM CHANGELOG + docs/translator.md.
+- [FUTURO][DX] Documento "dialecto C de CronoVM": subconjunto de C/LLVM soportado
+  + tabla de gotchas + notas de COSTE (i64-div ~bit-serial y carísimo, f64 caro,
+  varargs/printf poco fiable, intrinsics no bajados). Hoy ese saber está disperso
+  en comentarios; centralizarlo.
+- [FUTURO][DX] Hacer visible el coste en build: marcar funciones que usan
+  soft-i64/f64 (sobre todo división) para detectar regresiones de rendimiento
+  antes de perfilar. (Lección: FixedDiv vanilla i64 = 4,3x más lento que el
+  opcode QDIV; solo se vio perfilando.)
+- [FUTURO][DX] Mejor debugging: un printf/cron_log formateado GARANTIZADO (el
+  actual es frágil entre TUs/varargs) y un cron_assert/trap que reporte con
+  nombre de símbolo. Explotar más el profiler + sidecar .sym (atribución por
+  caller, ya existe cvm_prof_caller).
+- [FUTURO][DX] Iteración: cache de bitcode por TU en cronopio-cc (hoy retraduce
+  toda la lista de fuentes cada build). Y revisar la lista de fuentes a mano
+  (DOOM_KEEP): es frágil (ahí se escondía el stub de am_map).
+- [FUTURO][DX] Plantillas: añadir un "game skeleton" (máquina de estados/escenas)
+  y una de "input" que muestre el pad de 12 botones + hints en pantalla.
+
+# --- PX (jugador) ---
+- [FUTURO][PX][ALTA] Metadata de cartucho (header en ROM: título, autor, ayuda
+  de controles, thumbnail). Hoy un .bin es anónimo y nadie sabe los controles.
+  El browser F1 mostraría una "estantería" y enseñaría los controles al cargar.
+  Mayor win de PX por esfuerzo.
+- [FUTURO][PX] Niceties de host estilo emulador: screenshot a PNG con hotkey,
+  pausa/fast-forward, fullscreen + escalado entero.
+- [FUTURO][PX] Filtro CRT opcional (scanlines/curvatura). Identidad visual de
+  consola fantasía; win grande y barato.
+- [FUTURO][PX][ALTA] Gestión de saves. Hoy la persistencia es un blob plano por
+  cartucho (cron_save_read/write); DOOM guarda sus slots dentro de ese blob con
+  nombre automático del mapa. Falta una capa de gestión:
+  - Host: UI en el menú F1 para listar/borrar/respaldar los saves por cartucho
+    (cada .bin tiene su archivo de save junto al exe), y export/import del blob.
+  - Robustez: escritura atómica (temp + rename) para no corromper el save si se
+    cierra a mitad; versionado/migración del formato del blob.
+  - SDK: aclarar/ampliar el contrato de cron_save_read/write (tamaño máximo,
+    múltiples ranuras lógicas, borrado) y documentarlo.
+  - (Enlaza con la metadata de cartucho: el save se nombra/asocia por título.)
