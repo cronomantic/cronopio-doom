@@ -61,13 +61,19 @@
   pausa/fast-forward, fullscreen + escalado entero.
 - [FUTURO][PX] Filtro CRT opcional (scanlines/curvatura). Identidad visual de
   consola fantasía; win grande y barato.
-- [FUTURO][PX][ALTA] Gestión de saves. Hoy la persistencia es un blob plano por
-  cartucho (cron_save_read/write); DOOM guarda sus slots dentro de ese blob con
-  nombre automático del mapa. Falta una capa de gestión:
-  - Host: UI en el menú F1 para listar/borrar/respaldar los saves por cartucho
-    (cada .bin tiene su archivo de save junto al exe), y export/import del blob.
-  - Robustez: escritura atómica (temp + rename) para no corromper el save si se
-    cierra a mitad; versionado/migración del formato del blob.
-  - SDK: aclarar/ampliar el contrato de cron_save_read/write (tamaño máximo,
-    múltiples ranuras lógicas, borrado) y documentarlo.
-  - (Enlaza con la metadata de cartucho: el save se nombra/asocia por título.)
+- [HECHO 2026-05-24][PX] Gestión de saves — DOOM guarda/carga de verdad
+  (memory card). Antes NADA persistía: cron_save era RAM-only (el host nunca lo
+  escribía) y los savegames de DOOM iban por fopen (stub, sin FS). Ahora:
+  - Host: persiste el blob por-cart a <cart>.sav (escritura atómica temp+rename),
+    lo carga antes de correr el cart; en main.c y en cronopio-headless.
+  - SDK: cron_save grande (8MB) con save_len; nuevos cron_save_size/used.
+  - libc: FILESYSTEM-RAM (fopen/fread/fwrite/fseek/ftell/fclose/rename/remove/
+    access/unlink) sobre un blob serializado ("CFS1") a la región de guardado;
+    carga perezosa al primer acceso, flush en close/rename/remove. DOOM (y futuros
+    ports) guardan SIN tocar el motor.
+  - UI: el browser F1 muestra "Save: N KB" del cart enfocado y Supr lo borra.
+  Verificado headless: round-trip de un cart de prueba; y DOOM E1M1 guardar ->
+  doom.bin.sav (61KB, doomsav0.dsg) -> proceso nuevo -> Load muestra el slot ->
+  carga al nivel. docs/syscalls.md actualizado.
+  FUTURO: fscanf sobre el RAM-FS (hoy config de crispy no recarga, usa defaults);
+  export/import del blob; tamaño de región declarable por-cart.

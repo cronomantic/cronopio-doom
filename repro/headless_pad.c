@@ -42,6 +42,9 @@ int main(int argc, char** argv) {
     cronopio_console_init(&console);
     cronopio_resolve_video_regions(&img, &console);
     cronopio_syscalls_install(&img, &console);
+    /* per-cart save: load <cart>.sav before the entry runs */
+    char savepath[1100]; snprintf(savepath, sizeof savepath, "%s.sav", argv[1]);
+    { FILE* sf=fopen(savepath,"rb"); if(sf){ console.save_len=(uint32_t)fread(console.save,1,CRONOPIO_SAVE_BYTES,sf); fclose(sf); } }
     int32_t ret=0; cvm_run(&img, &ret);
 
     for (int fr = 0; fr < frames && !console.cart_exited; ++fr) {
@@ -58,6 +61,14 @@ int main(int argc, char** argv) {
         cronopio_console_begin_frame(&console);
         if (console.frame_fn_index > 0) { int32_t r=0; cvm_call(&img,(uint32_t)console.frame_fn_index,NULL,0,&r); }
         cronopio_console_end_frame(&console);
+    }
+
+    /* flush the save if the cart wrote to it */
+    if (console.save_dirty) {
+        char tmp[1112]; snprintf(tmp,sizeof tmp,"%s.tmp",savepath);
+        FILE* sf=fopen(tmp,"wb");
+        if(sf){ int ok=(console.save_len==0)||(fwrite(console.save,1,console.save_len,sf)==console.save_len);
+                if(fclose(sf)!=0) ok=0; if(ok){ remove(savepath); rename(tmp,savepath);} else remove(tmp); }
     }
 
     static uint32_t rgba[CRONOPIO_FB_BYTES];
