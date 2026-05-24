@@ -29,8 +29,9 @@ const uint8_t *engine_framebuffer(void);
 /* The current 256-entry RGB palette (768 bytes), or NULL to keep the last. */
 const uint8_t *engine_palette(void);
 
-/* Feed this frame's input. `pad` is the Cronopio gamepad bitmask (CRON_BTN_*);
- * the binding may also poll cron_key(scancode) directly for keyboard play. */
+/* Feed this frame's input. `pad` is the Cronopio gamepad bitmask (CRON_BTN_*,
+ * the 12-button SNES-style pad). DOOM is driven entirely from the pad; the host
+ * maps physical keyboard/controller -> pad bits, so no raw keyboard is read. */
 void engine_input(uint32_t pad);
 
 #endif /* CRONO_DOOM_ENGINE_H */

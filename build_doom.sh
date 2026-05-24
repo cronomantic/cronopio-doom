@@ -51,6 +51,7 @@ INCS=(
 
 # --- DOOM sources we keep (doom/*) -----------------------------------------
 DOOM_KEEP=(
+  am_map
   d_items d_main d_net d_pwad
   deh_ammo deh_bexincl deh_bexpars deh_bexptr deh_bexstr deh_cheat deh_doom
   deh_frame deh_misc deh_ptr deh_sound deh_thing deh_weapon
@@ -93,7 +94,6 @@ PORT=(
   "$ROOT/src/statdump_cron.c"
   "$ROOT/src/i_glob_cron.c"
   "$ROOT/src/w_file_rom.c"
-  "$ROOT/src/am_map_stub.c"
   "$ROOT/src/d_loop_cron.c"
   "$ROOT/src/m_fixed_cvm.c"
   "$SDK/lib/cvm_libc.c"

@@ -37,4 +37,14 @@ void I_Sleep(int ms) { (void)ms; }    /* console can't block; no-op */
 
 void I_WaitVBL(int count) { (void)count; }
 
-fixed_t I_GetFracRealTime(void) { return 0; }
+/* Fraction of the current 35Hz tic already elapsed, as Q16.16 (0..FRACUNIT) —
+ * drives camera/sprite interpolation when crispy->uncapped is on. Vanilla uses
+ * int64 ((int64)ms*TICRATE%1000*FRACUNIT/1000); we stay 32-bit via modular
+ * arithmetic: (ms*35)%1000 == ((ms%1000)*35)%1000, and (0..999)*FRACUNIT fits
+ * in int32. Called once per rendered frame, not a hot loop. */
+fixed_t I_GetFracRealTime(void)
+{
+    uint32_t ms   = cron_time_ms() - basetime;
+    uint32_t frac = ((ms % 1000u) * TICRATE) % 1000u;   /* 0..999 within the tic */
+    return (fixed_t)((frac * FRACUNIT) / 1000u);
+}

@@ -10,6 +10,7 @@
 
 #include "doomtype.h"
 #include "i_video.h"
+#include "i_timer.h"     /* I_GetFracRealTime — interpolation phase */
 #include "i_truecolor.h"
 #include "m_fixed.h"
 #include "crispy.h"
@@ -88,7 +89,7 @@ void I_InitGraphics(void)
     /* Pin Crispy to the vanilla pipeline before any geometry is computed. */
     crispy->hires      = 0;
     crispy->widescreen = 0;
-    crispy->uncapped   = 0;   /* kills camera-interp float paths (i64/f64) */
+    crispy->uncapped   = 1;   /* interpolated framerate (i_timer_cron I_GetFracRealTime) */
     crispy->vsync      = 0;
 
     I_GetScreenDimensions();
@@ -160,7 +161,7 @@ void I_StartFrame(void) { }
 void I_StartTic(void)   { }   /* input is fed from the cart's engine_input */
 void I_StartDisplay(void) { }
 
-void I_UpdateFracTic(void) { fractionaltic = 0; }
+void I_UpdateFracTic(void) { fractionaltic = I_GetFracRealTime(); }
 
 void I_BeginRead(void) { }
 void I_EnableLoadingDisk(int xoffs, int yoffs) { (void)xoffs; (void)yoffs; }

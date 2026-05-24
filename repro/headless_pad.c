@@ -1,8 +1,13 @@
-/* Headless menu-navigation harness: taps a sequence of HID scancodes (each
- * held a few frames, then released) and screenshots the final framebuffer.
- * Used to drive DOOM's menus without an interactive host.
+/* Headless PAD-injection harness: holds a sequence of 12-button pad masks
+ * (each held a few frames, then released) on cron_pad(0) and screenshots the
+ * final framebuffer. Since the cart is now pad-only (no raw keyboard), this is
+ * the way to drive its input from the command line.
  *
- *   headless_nav cart.bin out.ppm sc1 sc2 sc3 ...
+ *   headless_pad cart.bin out.ppm mask1 mask2 ...      (masks are hex/dec)
+ *
+ * Bits (CRON_BTN_*): UP=0x001 DOWN=0x002 LEFT=0x004 RIGHT=0x008
+ *                    A=0x010 B=0x020 X=0x040 Y=0x080
+ *                    L=0x100 R=0x200 START=0x400 SELECT=0x800
  */
 #include "console.h"
 #include "syscalls.h"
@@ -14,15 +19,18 @@
 static uint64_t g_frame_ms = 0;
 uint64_t cronopio_platform_ticks_ms(void) { return g_frame_ms; }
 
-#define HOLD 7
-#define GAP  9
-
 int main(int argc, char** argv) {
-    if (argc < 4) { fprintf(stderr, "usage: %s cart.bin out.ppm sc...\n", argv[0]); return 1; }
-    int nkeys = argc - 3;
+    if (argc < 4) { fprintf(stderr, "usage: %s cart.bin out.ppm mask...\n", argv[0]); return 1; }
+    int HOLD = getenv("HOLD") ? atoi(getenv("HOLD")) : 8;   /* frames each mask is held */
+    int GAP  = getenv("GAP")  ? atoi(getenv("GAP"))  : 10;  /* frames released between masks */
+    int nmask = argc - 3;
     int step = HOLD + GAP;
     int warm = 90;                 /* let the title settle */
-    int frames = warm + nkeys * step + 40;
+    int frames = warm + nmask * step + 40;
+    /* HOLDALL=1 holds mask[0] every frame; FRAMES=N sets the exact final frame.
+     * (Used to A/B sub-tic interpolation: same frame, capped vs uncapped.) */
+    int holdall = getenv("HOLDALL") ? 1 : 0;
+    if (getenv("FRAMES")) frames = atoi(getenv("FRAMES"));
 
     FILE* f = fopen(argv[1], "rb"); if (!f) return 1;
     fseek(f,0,SEEK_END); long n=ftell(f); rewind(f);
@@ -38,24 +46,14 @@ int main(int argc, char** argv) {
 
     for (int fr = 0; fr < frames && !console.cart_exited; ++fr) {
         g_frame_ms = (uint64_t)fr * 1000u / 60u;
-        memset(console.keys, 0, sizeof console.keys);
         console.pad_cur[0] = 0;
         int t = fr - warm;
-        if (t >= 0) {
+        if (holdall && fr >= warm) console.pad_cur[0] = (uint32_t)strtoul(argv[3], NULL, 0);
+        else if (t >= 0) {
             int idx = t / step;
             int phase = t % step;
-            if (idx < nkeys && phase < HOLD) {
-                int sc = (int)strtol(argv[3 + idx], NULL, 0);
-                console.keys[(sc>>3)&31] |= (uint8_t)(1u<<(sc&7));
-                /* also drive cron_pad like the desktop host does, to exercise
-                 * the gamepad+keyboard double-input dedup. */
-                uint32_t pb = 0;
-                if      (sc==0x52) pb=1u<<0; else if (sc==0x51) pb=1u<<1;
-                else if (sc==0x50) pb=1u<<2; else if (sc==0x4F) pb=1u<<3;
-                else if (sc==0x28) pb=1u<<4;   /* ENTER ~ pad A */
-                else if (sc==0x29) pb=1u<<7;   /* ESC ~ pad Y */
-                console.pad_cur[0] |= pb;
-            }
+            if (idx < nmask && phase < HOLD)
+                console.pad_cur[0] = (uint32_t)strtoul(argv[3 + idx], NULL, 0);
         }
         cronopio_console_begin_frame(&console);
         if (console.frame_fn_index > 0) { int32_t r=0; cvm_call(&img,(uint32_t)console.frame_fn_index,NULL,0,&r); }
@@ -68,6 +66,6 @@ int main(int argc, char** argv) {
     fprintf(p, "P6\n%d %d\n255\n", CRONOPIO_SCREEN_W, CRONOPIO_SCREEN_H);
     for (int i=0;i<CRONOPIO_FB_BYTES;++i){ uint32_t px=rgba[i]; uint8_t r[3]={px>>16,px>>8,px}; fwrite(r,1,3,p); }
     fclose(p);
-    printf("wrote %s (%d keys, %d frames)\n", argv[2], nkeys, frames);
+    printf("wrote %s (%d masks, %d frames)\n", argv[2], nmask, frames);
     return 0;
 }

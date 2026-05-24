@@ -7,8 +7,11 @@
  *   engine_tick()       -> doom_tick() == one D_RunFrame() iteration.
  *   engine_framebuffer()-> I_VideoBuffer (8bpp indexed, 320x200).
  *   engine_palette()    -> the 256x3 RGB palette stored by I_SetPalette.
- *   engine_input(pad)   -> translate cron_pad/cron_key edges into DOOM key
- *                          events posted via D_PostEvent.
+ *   engine_input(pad)   -> translate cron_pad (12-button SNES-style) edges
+ *                          into DOOM key events posted via D_PostEvent. The
+ *                          host maps physical keyboard/controller -> pad bits,
+ *                          so the cart never reads a raw keyboard (portable to
+ *                          keyboard-less targets; one remap surface in the host).
  */
 #include <cronopio.h>
 
@@ -18,7 +21,6 @@
 #include "doomtype.h"
 #include "d_event.h"
 #include "doomkeys.h"
-#include "crispy.h"   /* crispy->input: 0 = gamepad only, 1 = gamepad + keyboard */
 
 /* Crispy entry points (i_main.c is excluded; we own argc/argv). */
 extern void D_DoomMain(void);
@@ -85,44 +87,46 @@ static void post_key(boolean down, int key, int ascii)
 /* Map a gamepad bit to a DOOM key. ascii used for menu/typing where relevant. */
 typedef struct { uint32_t bit; int key; int ascii; } padmap_t;
 
-static const padmap_t padmaps[] = {
-    { CRON_BTN_UP,    KEY_UPARROW,    0   },
-    { CRON_BTN_DOWN,  KEY_DOWNARROW,  0   },
-    { CRON_BTN_LEFT,  KEY_LEFTARROW,  0   },
-    { CRON_BTN_RIGHT, KEY_RIGHTARROW, 0   },
-    { CRON_BTN_A,     KEY_ENTER,      KEY_ENTER },  /* confirm / use */
-    { CRON_BTN_B,     KEY_RCTRL,      0   },        /* fire */
-    { CRON_BTN_X,     ' ',            ' ' },        /* use (open doors) */
-    { CRON_BTN_Y,     KEY_ESCAPE,     0   },        /* menu / back */
+/* In-game mapping for the SNES-style 12-button pad. The cart posts the
+ * keycodes DOOM binds BY DEFAULT (see crispy m_controls.c), so gameplay is
+ * 100% pad: the desktop host turns physical keyboard/controller presses into
+ * pad bits (remappable in its F1 menu) and no raw keyboard reaches the cart.
+ * Keyboard-less targets therefore play identically. */
+static const padmap_t padmap_game[] = {
+    { CRON_BTN_UP,     KEY_UPARROW,    0   },  /* forward      (key_up)          */
+    { CRON_BTN_DOWN,   KEY_DOWNARROW,  0   },  /* back         (key_down)        */
+    { CRON_BTN_LEFT,   KEY_LEFTARROW,  0   },  /* turn left    (key_left)        */
+    { CRON_BTN_RIGHT,  KEY_RIGHTARROW, 0   },  /* turn right   (key_right)       */
+    { CRON_BTN_L,      ',',            0   },  /* strafe left  (key_strafeleft)  */
+    { CRON_BTN_R,      '.',            0   },  /* strafe right (key_straferight) */
+    { CRON_BTN_A,      KEY_RCTRL,      0   },  /* fire         (key_fire)        */
+    { CRON_BTN_B,      ' ',            ' ' },  /* use / open   (key_use)         */
+    { CRON_BTN_X,      ']',            0   },  /* next weapon  (key_nextweapon)  */
+    { CRON_BTN_Y,      '[',            0   },  /* prev weapon  (key_prevweapon)  */
+    { CRON_BTN_START,  KEY_ESCAPE,     0   },  /* open menu                      */
+    /* SELECT is handled specially (tap=automap / hold=autorun), not here. */
 };
-#define NUM_PADMAPS (int)(sizeof(padmaps) / sizeof(padmaps[0]))
+#define NUM_GAME (int)(sizeof(padmap_game) / sizeof(padmap_game[0]))
 
-/* ---- keyboard ---------------------------------------------------------- */
-/* cron_key(scancode) reports key state in the USB HID usage-ID space (the
- * CRON_KEY_* values in cronopio.h). That is exactly the space Crispy's
- * SCANCODE_TO_KEYS_ARRAY (doomkeys.h) is indexed by — the same table the
- * vendored SDL i_input.c uses — so we reuse it verbatim for a full classic
- * keyboard map (movement, weapons 1-7, use/fire/run/strafe, menu, F-keys)
- * with zero bespoke mapping. */
-static const int sc_to_key[] = SCANCODE_TO_KEYS_ARRAY;
-#define NUM_SCANCODES (int)(sizeof(sc_to_key) / sizeof(sc_to_key[0]))
-
-/* Modifier keys live above SCANCODE_TO_KEYS_ARRAY (which only covers HID
- * 0..103); map them the way the vendored i_input.c TranslateKey does so
- * fire (Ctrl), run (Shift) and strafe (Alt) work. */
-static const struct { int sc; int key; } kb_mods[] = {
-    { CRON_KEY_LCTRL,  KEY_RCTRL  }, { CRON_KEY_RCTRL,  KEY_RCTRL  },
-    { CRON_KEY_LSHIFT, KEY_RSHIFT }, { CRON_KEY_RSHIFT, KEY_RSHIFT },
-    { CRON_KEY_LALT,   KEY_LALT   }, { CRON_KEY_RALT,   KEY_RALT   },
+/* Menu / title mapping. While a menu is up, A/B must mean confirm/cancel
+ * (not fire/use), so engine_input selects this table on `menuactive`. The
+ * d-pad navigates; START also closes the menu. */
+static const padmap_t padmap_menu[] = {
+    { CRON_BTN_UP,     KEY_UPARROW,    0         },
+    { CRON_BTN_DOWN,   KEY_DOWNARROW,  0         },
+    { CRON_BTN_LEFT,   KEY_LEFTARROW,  0         },
+    { CRON_BTN_RIGHT,  KEY_RIGHTARROW, 0         },
+    { CRON_BTN_A,      KEY_ENTER,      KEY_ENTER },  /* confirm */
+    { CRON_BTN_B,      KEY_ESCAPE,     0         },  /* back / cancel */
+    { CRON_BTN_START,  KEY_ESCAPE,     0         },  /* close menu */
 };
-#define NUM_KBMODS (int)(sizeof(kb_mods) / sizeof(kb_mods[0]))
+#define NUM_MENU (int)(sizeof(padmap_menu) / sizeof(padmap_menu[0]))
 
-/* Per-DOOM-key state. We gather every input source into one "is this DOOM key
- * down" bitmap (key_now) and post edges against the previous frame. This
- * DEDUPES sources that map to the same DOOM key: e.g. the desktop host drives
- * both the cron_pad d-pad AND the raw arrow keys from the same physical keys,
- * which otherwise posted KEY_DOWNARROW twice and made menus skip entries. A
- * DOOM key is "down" if ANY active source holds it. */
+extern boolean menuactive;   /* m_menu.c — a DOOM menu is currently on screen */
+
+/* Per-DOOM-key state. We gather all mappings into one "is this DOOM key down"
+ * bitmap (key_now) and post a single edge per key against the previous frame.
+ * This keeps one clean edge even if several pad bits map to the same DOOM key. */
 static uint8_t key_now[256];
 static uint8_t key_prev[256];
 static int     key_ascii[256];
@@ -134,28 +138,42 @@ static void mark_key(int key, int ascii)
     key_ascii[key] = ascii;   /* same key -> same ascii from any source */
 }
 
+/* SELECT in play: a quick TAP toggles the automap; HOLDING it ~0.5s toggles
+ * autorun. SELECT is not a movement/combat button, so a long press never
+ * interferes with play (a shoulder/strafe chord would). ~60 input frames/s. */
+#define SELECT_HOLD_FRAMES 30
+
 void engine_input(uint32_t pad)
 {
+    static int     select_frames   = 0;
+    static boolean select_consumed = false;
+
     for (int k = 0; k < 256; ++k) key_now[k] = 0;
 
-    /* Gamepad — always active, the system's primary control. */
-    for (int i = 0; i < NUM_PADMAPS; ++i)
-        if (pad & padmaps[i].bit)
-            mark_key(padmaps[i].key, padmaps[i].ascii);
-
-    /* Keyboard — layered on top only when the Input Device setting includes it. */
-    if (crispy->input != 0)
+    /* SELECT long-press: only meaningful in play (ignored while a menu is up). */
+    if (!menuactive && (pad & CRON_BTN_SELECT))
     {
-        for (int sc = 0; sc < NUM_SCANCODES; ++sc)
+        if (++select_frames >= SELECT_HOLD_FRAMES && !select_consumed)
         {
-            int key = sc_to_key[sc];
-            if (key && cron_key(sc))
-                mark_key(key, (key >= 32 && key < 127) ? key : 0);
+            mark_key(KEY_CAPSLOCK, 0);     /* held long -> toggle autorun */
+            select_consumed = true;
         }
-        for (int i = 0; i < NUM_KBMODS; ++i)
-            if (cron_key(kb_mods[i].sc))
-                mark_key(kb_mods[i].key, 0);
     }
+    else
+    {
+        if (select_frames > 0 && !select_consumed && !menuactive)
+            mark_key(KEY_TAB, 0);          /* short tap released -> automap */
+        select_frames   = 0;
+        select_consumed = false;
+    }
+
+    /* Pick the binding table by context: confirm/cancel in menus, fire/use
+     * in play. Everything is a pad bit now — the host owns physical remap. */
+    const padmap_t *map = menuactive ? padmap_menu : padmap_game;
+    const int       n   = menuactive ? NUM_MENU    : NUM_GAME;
+    for (int i = 0; i < n; ++i)
+        if (pad & map[i].bit)
+            mark_key(map[i].key, map[i].ascii);
 
     /* Post one edge per DOOM key on the union of all sources. */
     for (int k = 1; k < 256; ++k)
