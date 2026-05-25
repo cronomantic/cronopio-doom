@@ -8,6 +8,33 @@
 - Poner algo en la pantalla del emulador durante la carga de DOOM en lugar de dejarla negra.
 - [HECHO 2026-05-23] Arreglar el sistema de log de Cronopio (host sys_log): fuerza un salto de línea en cada llamada, así que un printf(".") sin '\n' sale en líneas separadas. Debería escribir tal cual (la barra de carga de DOOM son printf(".") en una sola línea).
 - [HECHO 2026-05-23] Limpiar documentos no necesarios u obsoletos aquí.
+- [HECHO 2026-05-25] En el ejemplo cube de Cronopio, las texturas de cuadros se
+  deforman. Era warping AFÍN: cube.c pedía CRON_POLY_TEX (afín) en vez de
+  CRON_POLY_PERSP. El host ya soportaba perspectiva-correcta (poly.c interpola
+  u/w,v/w,1/w) y cron_emit_tri ya rellenaba .w (Q16.16); solo faltaba activar el
+  flag. Fix de 1 línea (examples/cube/cube.c). Verificado headless: el damero
+  queda en rejilla uniforme, sin doblez en la diagonal del quad.
+- [HECHO 2026-05-25] En el ejemplo sprites de Cronopio, el tilemap no hace
+  wraparound. cron_gpu_bltm (host/common/gpu.c) RECORTABA (continue) cuando la
+  fuente salía del mapa en vez de envolver. Fix: muestrea siempre con módulo del
+  tamaño del mapa (px/py % map_*_px, ajustando negativos) — el tilemap tilea
+  infinito, decisión "wrap siempre" (sin cambio de API). El ejemplo enmascaraba
+  el scroll con & 255 mientras el mapa mide 512px (64*8): corregido a
+  & (MAPW*TILE-1) / & (MAPH*TILE-1). Verificado headless: el fondo cubre los
+  320px y envuelve sin banda negra.
+- [HECHO 2026-05-25] Cronopio no compila para Clang. Todo el código C de Cronopio
+  (host SDL, libc/SDK, cvm, cronopio-cc) ya compilaba limpio con clang; el ÚNICO
+  fallo era el translator de CronoVM (tools/translator/CMakeLists.txt): añadía el
+  includedir de LLVM con -isystem, que lo busca ANTES de los dirs de sistema. Con
+  un LLVM cuyo prefijo trae además una libc (p.ej. msys2 /ucrt64/include), el
+  #include_next <stddef.h> de libc++ encontraba esa libc en vez de la del propio
+  toolchain -> error "tried including <stddef.h> but didn't find libc++'s". GCC no
+  lo notaba (libstdc++ no hace esa comprobación). Fix: añadir el includedir de LLVM
+  con -idirafter en GNU/Clang (buscado DESPUÉS de los dirs de sistema; las cabeceras
+  del toolchain ganan, las de LLVM siguen encontrándose); -isystem en MSVC. En un
+  helper cvm_add_llvm_includes(). Verificado: build completo con clang (mstorsjo
+  llvm-mingw) compila+enlaza y un cart hace round-trip por el toolchain de clang.
+- [FUTURO] Hacer un port de Quake que aproveche las capacidades 3D de Cronopio.
 
 # ===========================================================================
 # Mejoras de experiencia (propuestas 2026-05-24). DX = programador, PX = jugador.
