@@ -24,17 +24,23 @@ RT="$CRONOPIO/external/CronoVM/runtime/lib"
 CRBUILD="$CRONOPIO/build"
 CC="$CRBUILD/tools/cronopio-cc/cronopio-cc.exe"
 
-# The cart compiler is a built artifact; auto-build the SDK tools (and the host
-# binaries used to run the cart) if it's missing.
-if [[ ! -x "$CC" ]]; then
-  echo "[build] cronopio-cc not found — building Cronopio SDK tools (one-time)..."
-  if [[ ! -f "$CRBUILD/build.ninja" ]]; then
-    cmake -S "$CRONOPIO" -B "$CRBUILD" -G Ninja || {
-      echo "[build] ERROR: cmake configure of Cronopio failed." >&2; exit 1; }
-  fi
-  ninja -C "$CRBUILD" cronopio-cc cronopio cronopio-headless || {
-    echo "[build] ERROR: building Cronopio tools failed." >&2; exit 1; }
+# The cart compiler + host are built artifacts. ALWAYS re-sync them with the
+# current VM/translator so the cart never links a stale translator (see the
+# GlobalAlias/picolibc work) or runs on a stale host ("unknown opcode").
+if [[ ! -f "$CRBUILD/build.ninja" ]]; then
+  echo "[build] configuring Cronopio SDK (one-time)..."
+  cmake -S "$CRONOPIO" -B "$CRBUILD" -G Ninja || {
+    echo "[build] ERROR: cmake configure of Cronopio failed." >&2; exit 1; }
 fi
+echo "[build] syncing Cronopio tools + host with the current VM..."
+ninja -C "$CRBUILD" cronopio-cc cronopio cronopio-headless || {
+  echo "[build] ERROR: building Cronopio tools failed." >&2; exit 1; }
+
+# Build picolibc.bc — the C library. DOOM keeps picolibc's canonical malloc
+# (no --no-malloc); cron_sys.c supplies the sbrk machine port + errno.
+echo "[build] building picolibc.bc (C library)..."
+bash "$RT/build_picolibc.sh" || {
+  echo "[build] ERROR: build_picolibc.sh failed." >&2; exit 1; }
 
 IWAD="${1:-$ROOT/wads/freedoom1.wad}"
 OUT="${2:-$ROOT/doom.bin}"
@@ -96,7 +102,8 @@ PORT=(
   "$ROOT/src/w_file_rom.c"
   "$ROOT/src/d_loop_cron.c"
   "$ROOT/src/m_fixed_cvm.c"
-  "$SDK/lib/cvm_libc.c"
+  "$SDK/lib/cron_sys.c"
+  "$RT/picolibc.bc"
 )
 
 echo "[build] $(( ${#SOURCES[@]} + ${#PORT[@]} )) translation units -> $OUT"
